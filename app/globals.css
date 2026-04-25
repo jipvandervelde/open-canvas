@@ -1,0 +1,5354 @@
+@import "tailwindcss";
+
+/* v4 — skills sidebar layout + chip styles. */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Design tokens
+   Single source of truth for colors, surfaces, shadows, radii, z-index.
+   Uses OKLCH where helpful for perceptually-uniform tints. Dark mode is a
+   variable-flip, not Tailwind `dark:` utilities.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Tool chrome adopts the same defaults as project design tokens
+     (see lib/design-tokens-store.ts DEFAULTS). Surfaces map to bg.*,
+     text to fg.*, accent to brand, state to state.*. The tool's
+     extra weights (surface-1, text-muted) alias to the nearest
+     project value rather than inventing in-between shades. */
+
+  /* Canvas-level surfaces — map to project bg.primary / .secondary / .tertiary */
+  --surface-0: #FFFFFF;  /* app background — bg.primary */
+  --surface-1: #FFFFFF;  /* panels (inspector, chat) — bg.primary, separated by border */
+  --surface-2: #F2F3F3;  /* raised controls (chips, code bg) — bg.secondary */
+  --surface-3: #EBECEC;  /* hover/pressed on --surface-2 — bg.tertiary */
+  --surface-inverse: #1A1C1F; /* dark accents — fg.primary */
+
+  /* Text — map to project fg.primary / .secondary / .tertiary */
+  --text-primary: #1A1C1F;
+  --text-secondary: #8E8F90;
+  --text-tertiary: #D2D2D3;
+  --text-muted: #D2D2D3; /* aliases fg.tertiary; project has 3 weights */
+
+  /* Accent — project brand (iOS systemBlue). Hover/subtle are derived
+     so they automatically follow if brand is ever retuned. */
+  --accent-base: #009FFF;
+  --accent-hover: color-mix(in oklab, var(--accent-base) 88%, black);
+  --accent-subtle: color-mix(in oklab, var(--accent-base) 14%, var(--surface-1));
+  --accent-on: #FFFFFF;
+
+  /* State — mode-invariant, matching project state.* */
+  --state-error: #FF4236;
+  --state-error-subtle: color-mix(in oklab, var(--state-error) 12%, var(--surface-1));
+  --state-warn: #FF893A;
+  --state-success: #00C54C;
+
+  /* Borders — alpha over current surface for natural blend */
+  --border-subtle: color-mix(in oklch, var(--text-primary) 10%, transparent);
+  --border-strong: color-mix(in oklch, var(--text-primary) 16%, transparent);
+  --border-focus: var(--accent-base);
+
+  /* Hairline */
+  --border-hairline: 1px;
+  @media only screen and (min-device-pixel-ratio: 2),
+    only screen and (min-resolution: 192dpi) {
+    --border-hairline: 0.5px;
+  }
+
+  /* Shadows — always pure black (not foreground-color mixed), so elevation
+     reads the same in light and dark mode and lands consistently against the
+     near-black canvas backdrop. */
+  --shadow-low:
+    0 1px 0 0 rgba(0, 0, 0, 0.04),
+    0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-mid:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 2px 0 rgba(0, 0, 0, 0.06),
+    0 6px 14px -4px rgba(0, 0, 0, 0.1);
+  --shadow-high:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 2px 4px 0 rgba(0, 0, 0, 0.06),
+    0 12px 28px -6px rgba(0, 0, 0, 0.16);
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Spacing rhythm (used by a few one-off scopes; Tailwind covers the rest) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  /* z-index scale */
+  --z-canvas: 0;
+  --z-overlay: 20;
+  --z-panel: 40;
+  --z-chat: 50;
+  --z-modal: 100;
+  --z-toast: 200;
+
+  /* Workspace sidebar widths (consumed by TldrawCanvas + panels) */
+  --left-panel-w: 400px;
+  --right-panel-w: 460px; /* Preview panel default; overridden by preview-panel-store on hydrate */
+
+  /* Chat surfaces — pale brand-tinted user bubble, derived so it tracks brand */
+  --chat-user-bg: color-mix(in oklab, var(--accent-base) 10%, var(--surface-1));
+  --chat-composer-bg: var(--surface-1);
+
+  /* Font stacks */
+  --font-ui: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Pre-hydration fallback: when the user's system is dark and we haven't
+   committed an explicit theme to <html> yet (SSR → hydration gap), paint
+   using dark tokens so we don't flash light for a frame. As soon as the
+   boot script or ThemeApplier sets `data-theme`, the explicit rule below
+   takes over. Users who've explicitly chosen light (`data-theme="light"`)
+   are excluded so their choice still wins.  */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-0: #181818;
+    --surface-1: #181818;
+    --surface-2: #1F1F1F;
+    --surface-3: #2D2D2D;
+    --surface-inverse: #FFFFFF;
+
+    --text-primary: #FFFFFF;
+    --text-secondary: #8B8B8B;
+    --text-tertiary: #464646;
+    --text-muted: #464646;
+
+    --accent-base: #009FFF;
+    --accent-hover: color-mix(in oklab, var(--accent-base) 88%, white);
+    --accent-subtle: color-mix(in oklab, var(--accent-base) 22%, var(--surface-2));
+    --accent-on: #FFFFFF;
+
+    --state-error: #FF4236;
+    --state-error-subtle: color-mix(in oklab, var(--state-error) 22%, var(--surface-2));
+    --state-warn: #FF893A;
+    --state-success: #00C54C;
+
+    --border-subtle: color-mix(in oklch, var(--text-primary) 10%, transparent);
+    --border-strong: color-mix(in oklch, var(--text-primary) 18%, transparent);
+
+    --chat-user-bg: color-mix(in oklab, var(--accent-base) 22%, var(--surface-2));
+    --chat-composer-bg: var(--surface-2);
+
+    color-scheme: dark;
+  }
+}
+
+/* Dark theme applied via explicit [data-theme="dark"] on <html>. The ThemeStore
+   sets this attribute on hydration and on every user toggle. */
+[data-theme="dark"] {
+  --surface-0: #181818;
+  --surface-1: #181818;
+  --surface-2: #1F1F1F;
+  --surface-3: #2D2D2D;
+  --surface-inverse: #FFFFFF;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B8B8B;
+  --text-tertiary: #464646;
+  --text-muted: #464646;
+
+  --accent-base: #009FFF;
+  --accent-hover: color-mix(in oklab, var(--accent-base) 88%, white);
+  --accent-subtle: color-mix(in oklab, var(--accent-base) 22%, var(--surface-2));
+  --accent-on: #FFFFFF;
+
+  --state-error: #FF4236;
+  --state-error-subtle: color-mix(in oklab, var(--state-error) 22%, var(--surface-2));
+  --state-warn: #FF893A;
+  --state-success: #00C54C;
+
+  --border-subtle: color-mix(in oklch, var(--text-primary) 10%, transparent);
+  --border-strong: color-mix(in oklch, var(--text-primary) 18%, transparent);
+
+  --chat-user-bg: color-mix(in oklab, var(--accent-base) 22%, var(--surface-2));
+  --chat-composer-bg: var(--surface-2);
+}
+
+@theme inline {
+  /* Expose tokens to Tailwind utilities */
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-inverse: var(--surface-inverse);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-muted: var(--text-muted);
+
+  --color-accent: var(--accent-base);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-on: var(--accent-on);
+
+  --color-state-error: var(--state-error);
+  --color-state-error-subtle: var(--state-error-subtle);
+  --color-state-warn: var(--state-warn);
+  --color-state-success: var(--state-success);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
+html,
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-variant-ligatures: common-ligatures;
+}
+
+/* Tabular numerics for sizes, times, counts */
+.oc-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Balanced headline wrap — used sparingly; the docstring still applies */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* Focus styles — neutral, no colored outlines */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   CodeMirror theme — framed as a subtle recessed panel inside the Inspector.
+   Overrides default CM styles to blend with surface tokens.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-code-editor {
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  overflow: hidden;
+}
+.oc-code-editor .cm-editor {
+  background: transparent;
+  outline: none !important;
+}
+.oc-code-editor .cm-editor.cm-focused {
+  outline: none !important;
+  box-shadow: none;
+}
+.oc-code-editor .cm-scroller {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.oc-code-editor .cm-gutters {
+  background: transparent;
+  border-right: var(--border-hairline) solid var(--border-subtle);
+  color: var(--text-muted);
+}
+.oc-code-editor .cm-lineNumbers .cm-gutterElement {
+  padding: 0 10px 0 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.8em;
+}
+.oc-code-editor .cm-activeLineGutter,
+.oc-code-editor .cm-activeLine {
+  background: transparent;
+}
+.oc-code-editor .cm-content {
+  caret-color: var(--accent-base);
+}
+.oc-code-editor .cm-line {
+  padding: 0 12px;
+}
+/* Minimal syntax colors — stay calm inside the panel */
+.oc-code-editor .ͼ1 .tok-keyword,
+.oc-code-editor .cm-keyword { color: oklch(0.48 0.18 285); }
+.oc-code-editor .cm-string { color: oklch(0.48 0.14 145); }
+.oc-code-editor .cm-number { color: oklch(0.55 0.16 40); }
+.oc-code-editor .cm-comment { color: var(--text-muted); font-style: italic; }
+.oc-code-editor .cm-property,
+.oc-code-editor .cm-propertyName { color: oklch(0.42 0.09 225); }
+.oc-code-editor .cm-operator { color: var(--text-secondary); }
+.oc-code-editor .cm-tag,
+.oc-code-editor .cm-tagName { color: oklch(0.48 0.17 350); }
+.oc-code-editor .cm-attributeName { color: oklch(0.50 0.12 280); }
+
+[data-theme="dark"] .oc-code-editor .cm-keyword { color: oklch(0.78 0.17 285); }
+[data-theme="dark"] .oc-code-editor .cm-string { color: oklch(0.82 0.14 145); }
+[data-theme="dark"] .oc-code-editor .cm-number { color: oklch(0.80 0.15 60); }
+[data-theme="dark"] .oc-code-editor .cm-property,
+[data-theme="dark"] .oc-code-editor .cm-propertyName { color: oklch(0.80 0.10 225); }
+[data-theme="dark"] .oc-code-editor .cm-tag,
+[data-theme="dark"] .oc-code-editor .cm-tagName { color: oklch(0.80 0.17 350); }
+[data-theme="dark"] .oc-code-editor .cm-attributeName { color: oklch(0.78 0.10 280); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Code tab — left file tree + right editor split view. Always-on — lists
+   every editable file in the project (screens / components / services /
+   data / tokens) so the user can pop into source at any time.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-code-tab {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.oc-code-tree {
+  /* Match the Components-tab sidebar (200px) so the two split panels
+     align visually when the user toggles between Code and Components. */
+  flex: 0 0 200px;
+  min-width: 200px;
+  overflow-y: auto;
+  padding: 6px 4px 12px;
+  box-shadow: inset -1px 0 0 0 var(--border-subtle);
+  font-family: var(--font-ui);
+}
+.oc-code-tree-group {
+  padding: 6px 4px 4px;
+}
+.oc-code-tree-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.oc-code-tree-empty {
+  padding: 2px 10px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.oc-code-tree-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.oc-code-tree-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-code-tree-item:hover {
+    background: color-mix(in oklch, var(--text-primary) 6%, transparent);
+    color: var(--text-primary);
+  }
+}
+.oc-code-tree-item[data-active] {
+  background: color-mix(in oklch, var(--accent-base) 14%, transparent);
+  color: var(--text-primary);
+}
+.oc-code-tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-code-tree-badge {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--text-primary) 6%, transparent);
+}
+.oc-code-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 12px 12px;
+  gap: 8px;
+}
+.oc-code-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.oc-code-readonly {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--text-primary) 8%, transparent);
+  margin-left: auto;
+}
+.oc-code-editor-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.oc-code-editor-wrap > .oc-code-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Artboard pills — tactile, elevated, hover-only affordances.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-low);
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out,
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .oc-pill:hover {
+    transform: translateY(-0.5px);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-mid);
+    color: var(--text-primary);
+  }
+}
+.oc-pill:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-low);
+}
+.oc-pill--name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.oc-pill--name[data-selected] {
+  background: var(--accent-base);
+  color: var(--accent-on);
+  box-shadow: var(--shadow-mid);
+}
+/* Sheet/nested-view pill — accent-tinted badge + parent breadcrumb. */
+.oc-pill-parent {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-right: 4px;
+}
+.oc-pill-sep {
+  color: var(--text-tertiary);
+  margin-right: 4px;
+  font-size: 10px;
+}
+.oc-pill-badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: color-mix(in oklch, var(--accent-base) 14%, var(--surface-1));
+  color: var(--accent-base);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 30%, transparent);
+}
+.oc-pill--name[data-selected] .oc-pill-parent,
+.oc-pill--name[data-selected] .oc-pill-sep {
+  color: color-mix(in oklch, var(--accent-on) 70%, transparent);
+}
+.oc-pill--name[data-selected] .oc-pill-badge {
+  background: color-mix(in oklch, var(--accent-on) 20%, transparent);
+  color: var(--accent-on);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-on) 40%, transparent);
+}
+/* Icon-only variant — square-ish, no label, for actions like reset preview. */
+.oc-pill--icon {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+.oc-pill--icon svg {
+  flex: 0 0 auto;
+}
+@media (hover: hover) {
+  .oc-pill--icon:hover {
+    color: var(--text-primary);
+  }
+}
+.oc-pill--icon:active svg {
+  transform: rotate(-45deg);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Viewport chooser: a visible text + chevron that the user reads, with an
+   invisible native <select> overlay handling the actual dropdown. This keeps
+   keyboard + accessibility behavior while letting us control exact layout —
+   Chrome otherwise sizes a <select> to its widest option, which pushes the
+   caret far away from the current label. */
+.oc-viewport-chooser {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 2px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-viewport-chooser:hover {
+    color: var(--text-primary);
+  }
+}
+.oc-viewport-chooser-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.oc-viewport-chooser-caret {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: inherit;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.oc-viewport-chooser select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: transparent;
+}
+.oc-pill--error {
+  color: var(--state-error);
+  background: var(--state-error-subtle);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--state-error) 24%, transparent),
+    var(--shadow-low);
+}
+
+/* Error popover — expands below the error pill to show the running log. */
+.oc-error-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 280px;
+  max-width: 360px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 8px 24px -6px rgba(0, 0, 0, 0.22),
+    0 20px 48px -12px rgba(0, 0, 0, 0.18);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-error-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 2px;
+}
+.oc-error-popover-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-error-popover-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+.oc-error-popover-action {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-error-popover-action:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--surface-2);
+  }
+}
+.oc-error-popover-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.oc-error-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: default;
+  transition: background-color 120ms ease-out;
+}
+.oc-error-entry[data-expandable] {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-error-entry[data-expandable]:hover {
+    background: var(--surface-2);
+  }
+}
+.oc-error-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.oc-error-entry-source {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+}
+.oc-error-entry-source--compile {
+  color: var(--state-error);
+  background: var(--state-error-subtle);
+}
+.oc-error-entry-source--runtime {
+  color: var(--state-warn);
+  background: color-mix(in oklch, var(--state-warn) 18%, var(--surface-1));
+}
+.oc-error-entry-source--tool {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 14%, var(--surface-1));
+}
+.oc-error-entry-time {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.oc-error-entry-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Chat panel — theme-aware, Gemini-ish. User messages use an asymmetric
+   "tail" corner on the top-right. Assistant replies are prose with a
+   sparkle avatar, not bubbled. Composer is a single rounded pill that hosts
+   the textarea and attach/send buttons inline.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-chat {
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+/* Shared chrome for both left (chat) and right (preview) floating panels.
+   Mirrors the on-canvas screen chrome (see screen-runtime.tsx): 1px
+   hairline border in both modes + a single soft drop shadow, opacity
+   tuned per theme. Subtle and card-like rather than dramatically lifted. */
+.oc-chat,
+.oc-preview {
+  border-radius: 20px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+[data-theme="dark"] .oc-chat,
+[data-theme="dark"] .oc-preview {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Native canvas — edge-to-edge under the floating panels. Theme-aware
+   backdrop: the slight recess of bg.secondary against bg.primary panels
+   gives the same visual layering Figma users expect. The dot pattern is
+   drawn from --text-primary at low alpha so it auto-flips dark-on-light /
+   light-on-dark. OpenCanvas controls background-size + background-position
+   via inline styles so the pattern follows the camera.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-canvas-root {
+  background-color: var(--surface-2);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--text-primary) 12%, transparent) 1px,
+    transparent 1px
+  );
+  z-index: 0;
+}
+
+/* Drag handle on the right edge of the left panel. A narrow hit area that
+   widens on hover / active so it's forgiving to aim at without stealing
+   visual weight at rest. */
+.oc-left-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 60;
+  background: transparent;
+  transition: background-color 120ms ease-out;
+  touch-action: none;
+}
+@media (hover: hover) {
+  .oc-left-resizer:hover {
+    background: color-mix(in oklch, var(--accent-base) 22%, transparent);
+  }
+}
+.oc-left-resizer[data-dragging] {
+  background: color-mix(in oklch, var(--accent-base) 42%, transparent);
+}
+
+/* Mirror of .oc-left-resizer for the right-side Preview panel. Handle lives
+   on the LEFT edge of the preview (touches the canvas side), same widening
+   behavior on hover/drag. */
+.oc-right-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 10;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 120ms ease-out;
+  touch-action: none;
+}
+@media (hover: hover) {
+  .oc-right-resizer:hover {
+    background: color-mix(in oklch, var(--accent-base) 22%, transparent);
+  }
+}
+.oc-right-resizer[data-dragging] {
+  background: color-mix(in oklch, var(--accent-base) 42%, transparent);
+}
+
+/* Sandpack fills the device frame inside the Preview panel. Without this
+   the wrapper chain collapses to ~160px — same rule ScreenShapeUtil ships
+   for its in-canvas Sandpack, re-scoped for the right-side preview. */
+.oc-preview .sp-wrapper,
+.oc-preview .sp-layout,
+.oc-preview .sp-stack,
+.oc-preview .sp-preview-container,
+.oc-preview .sp-preview-iframe {
+  height: 100% !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  flex: 1 1 0% !important;
+}
+.oc-preview .sp-wrapper {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Small rail / icon buttons inside the Preview panel. */
+.oc-preview-rail-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.oc-preview-rail-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.oc-preview-icon-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.oc-preview-icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+/* Segmented Fit / 100% zoom toggle in the Preview header. Keyboard-focusable
+   per-segment; active segment pops to surface-0 to read as "selected". */
+/* Single "100%" reset button — one tap returns the preview to actual size.
+   Panel resize flips zoom back to "fit" automatically, so no separate
+   "Fit" button is needed. Active state = preview is currently at 100%. */
+.oc-preview-reset {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out;
+  font-variant-numeric: tabular-nums;
+}
+.oc-preview-reset:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.oc-preview-reset[data-active] {
+  background: var(--accent-base);
+  border-color: var(--accent-base);
+  color: var(--accent-on);
+}
+
+/* Bottom-left corner diagonal resize handle on the Preview panel. 16×16
+   hit target anchored into the panel corner, with a chevron glyph pointing
+   outward to hint at the diagonal drag direction. */
+.oc-preview-corner-resizer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  cursor: nesw-resize;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  transition: opacity 120ms ease-out, color 120ms ease-out;
+  z-index: 70;
+}
+.oc-preview-corner-resizer:hover,
+.oc-preview-corner-resizer[data-dragging] {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+/* Sparkle avatar (+ oversized variant for empty state) */
+.oc-sparkle {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, oklch(0.70 0.20 295), oklch(0.74 0.18 240));
+  color: white;
+  font-size: 13px;
+  line-height: 1;
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--accent-base) 30%, transparent);
+}
+.oc-sparkle--lg {
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+  box-shadow:
+    0 2px 6px -1px color-mix(in oklch, var(--accent-base) 35%, transparent),
+    0 12px 28px -6px color-mix(in oklch, var(--accent-base) 22%, transparent);
+}
+
+/* Empty state */
+.oc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  padding: 16px 24px 24px;
+  text-align: center;
+}
+.oc-empty-title {
+  margin-top: 18px;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  background: linear-gradient(95deg, oklch(0.60 0.22 285), oklch(0.62 0.20 230));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.oc-empty-sub {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  max-width: 280px;
+}
+.oc-suggest-row {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 340px;
+}
+.oc-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.3;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-suggest:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--border-strong);
+  }
+}
+.oc-suggest:active { transform: translateY(0.5px); }
+
+/* Messages */
+.oc-msg-user {
+  background: var(--chat-user-bg);
+  color: var(--text-primary);
+  padding: 10px 16px;
+  border-radius: 22px;
+  border-top-right-radius: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 85%;
+  display: inline-block;
+  word-break: break-word;
+}
+.oc-msg-agent {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  min-width: 0;
+  word-break: break-word;
+}
+.oc-msg-agent > * + * { margin-top: 8px; }
+.oc-msg-text {
+  white-space: pre-wrap;
+}
+
+/* Extended-thinking / reasoning block — collapsed by default once done.
+   Streams expanded so the user sees live thought, then tucks away. */
+.oc-reasoning {
+  border-left: 2px solid var(--border-subtle);
+  padding: 2px 0 2px 10px;
+  transition: border-color 150ms ease-out;
+}
+.oc-reasoning--streaming {
+  border-left-color: color-mix(in oklch, var(--accent-base) 55%, transparent);
+}
+.oc-reasoning-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  transition: color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-reasoning-head:hover {
+    color: var(--text-secondary);
+  }
+}
+.oc-reasoning--streaming .oc-reasoning-head {
+  color: var(--accent-base);
+}
+.oc-reasoning-glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .oc-reasoning--streaming .oc-reasoning-glyph {
+    animation: oc-reasoning-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes oc-reasoning-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.oc-reasoning-caret {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 180ms ease-out;
+  margin-left: 2px;
+  opacity: 0.7;
+}
+.oc-reasoning-caret[data-open] {
+  transform: rotate(90deg);
+}
+.oc-reasoning-body {
+  margin-top: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  font-style: italic;
+  white-space: pre-wrap;
+  padding-right: 6px;
+}
+.oc-reasoning-body::-webkit-scrollbar {
+  width: 8px;
+}
+.oc-reasoning-body::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--text-primary) 12%, transparent);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Heartbeat — escalating visual state when reasoning runs long without
+   producing an action. Cheap nudge that something is off, without yelling.
+   See BRAINSTORM.md §14.5 "Agent turn rhythm". */
+.oc-reasoning--warn-low .oc-reasoning-head {
+  color: color-mix(in oklch, var(--accent-base) 70%, var(--text-secondary));
+}
+.oc-reasoning--warn-medium {
+  border-left-color: color-mix(in oklch, var(--state-warning, var(--accent-base)) 75%, transparent);
+}
+.oc-reasoning--warn-medium .oc-reasoning-head {
+  color: color-mix(in oklch, var(--state-warning, var(--accent-base)) 80%, var(--text-secondary));
+}
+.oc-reasoning--warn-high {
+  border-left-color: color-mix(in oklch, var(--state-error) 80%, transparent);
+}
+.oc-reasoning--warn-high .oc-reasoning-head {
+  color: color-mix(in oklch, var(--state-error) 80%, var(--text-secondary));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .oc-reasoning--warn-high .oc-reasoning-glyph {
+    animation-duration: 0.7s;
+  }
+}
+
+/* Visible reasoning chip — produced by the `think` tool. Sits inline in
+   the chat, showing a short topic; the thought body opens on click. This
+   is the preferred surface for any reasoning worth making the user see,
+   and the reason hidden reasoning blocks should stay short. */
+.oc-think {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--accent-base) 5%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 18%, transparent);
+  padding: 4px 10px 4px 8px;
+  transition: background 140ms ease-out, box-shadow 140ms ease-out;
+}
+.oc-think--streaming {
+  background: color-mix(in oklch, var(--accent-base) 10%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 35%, transparent);
+}
+.oc-think--open {
+  align-self: stretch;
+}
+.oc-think-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  color: color-mix(in oklch, var(--accent-base) 85%, var(--text-primary));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  min-width: 0;
+}
+.oc-think-head:disabled {
+  cursor: default;
+}
+.oc-think-glyph {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .oc-think--streaming .oc-think-glyph {
+    animation: oc-reasoning-pulse 1.4s ease-in-out infinite;
+  }
+}
+.oc-think-topic {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.oc-think-caret {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 180ms ease-out;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+.oc-think-caret[data-open] {
+  transform: rotate(90deg);
+}
+.oc-think-body {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  padding: 2px 2px 4px;
+}
+
+/* Plan card — agent-written checklist with live progress. */
+.oc-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.oc-plan-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.oc-plan-progress {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-plan-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.oc-plan-bar-fill {
+  height: 100%;
+  background: var(--accent-base);
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oc-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-plan-task {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  transition: color 160ms ease-out, opacity 160ms ease-out;
+}
+.oc-plan-task[data-status="complete"] {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--text-tertiary) 60%, transparent);
+}
+.oc-plan-task[data-status="in_progress"] {
+  color: var(--text-primary);
+}
+.oc-plan-task[data-status="failed"] {
+  color: var(--state-error);
+}
+.oc-plan-task-icon {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+.oc-plan-task[data-status="complete"] .oc-plan-task-icon {
+  color: var(--state-success);
+}
+.oc-plan-task[data-status="in_progress"] .oc-plan-task-icon {
+  color: var(--accent-base);
+}
+.oc-plan-task[data-status="failed"] .oc-plan-task-icon {
+  color: var(--state-error);
+}
+.oc-plan-task-body {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.oc-plan-task-desc {
+  display: inline;
+}
+.oc-plan-task-par {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  font-family: var(--font-mono);
+}
+.oc-plan-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* Rich tool card for screen ops — shows verb + target + status + CTA */
+.oc-toolcard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  min-width: 0;
+  transition:
+    background-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 120ms ease-out;
+}
+.oc-toolcard--clickable {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-toolcard--clickable:hover {
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+}
+.oc-toolcard--clickable:active {
+  transform: translateY(0.5px);
+}
+.oc-toolcard--clickable:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.oc-toolcard--streaming {
+  background: color-mix(in oklch, var(--accent-base) 10%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 40%, transparent);
+}
+.oc-toolcard--error {
+  background: var(--state-error-subtle);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--state-error) 35%, transparent);
+}
+.oc-toolcard-icon {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+.oc-toolcard--streaming .oc-toolcard-icon {
+  background: color-mix(in oklch, var(--accent-base) 22%, var(--surface-1));
+  color: var(--accent-base);
+}
+.oc-toolcard--error .oc-toolcard-icon {
+  background: color-mix(in oklch, var(--state-error) 18%, var(--surface-1));
+  color: var(--state-error);
+}
+.oc-toolcard-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.oc-toolcard-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-primary);
+  min-width: 0;
+}
+.oc-toolcard-verb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-toolcard-agent {
+  color: var(--accent-base);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.oc-toolcard-sep {
+  color: var(--text-tertiary);
+}
+.oc-toolcard-viewport {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+.oc-toolcard-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+.oc-toolcard--streaming .oc-toolcard-status {
+  color: var(--accent-base);
+}
+.oc-toolcard--done .oc-toolcard-status {
+  color: var(--state-success);
+}
+.oc-toolcard-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .oc-toolcard--streaming .oc-toolcard-dot {
+    animation: oc-toolcard-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes oc-toolcard-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+.oc-toolcard-err {
+  font-size: 11.5px;
+  color: var(--state-error);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.35;
+}
+.oc-toolcard-cta {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent-base);
+  padding-left: 4px;
+}
+
+/* Description sub-line — used by CodePrimitiveCard + DataEntityCard under
+   the title. One line, ellipsis, secondary colour so the title stays the
+   eye's first anchor. */
+.oc-toolcard-sub {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+/* Field strip for DataEntityCard — each schema field is a compact pill
+   with the name + type; overflow collapses to a "+N" pill so even a
+   20-field entity stays on two lines. */
+.oc-toolcard-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+.oc-toolcard-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-toolcard-field-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.oc-toolcard-field-type {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-variant-ligatures: none;
+  opacity: 0.85;
+}
+.oc-toolcard-field--more {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Expand controls + expanded content for every tool card. The expand
+   button sits at the bottom of the card body; clicking it (with
+   stopPropagation) toggles the card into its expanded state and reveals
+   the full-code / reasoning / fields-full blocks below. */
+.oc-toolcard-expand {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-toolcard-expand:hover {
+    color: var(--accent-base);
+  }
+}
+.oc-toolcard-expand-caret {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.9;
+}
+.oc-toolcard--expanded .oc-toolcard-expand {
+  color: var(--accent-base);
+}
+
+.oc-toolcard-fullcode {
+  margin: 8px 0 0 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0;
+  background: var(--surface-0);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+.oc-toolcard-fullcode::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.oc-toolcard-fullcode::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--text-primary) 12%, transparent);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Italic transcript of reviewer thinking — used inside ReviewScreenCard's
+   expanded body and any future card that surfaces a reasoning stream. */
+.oc-toolcard-reasoning {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  font-style: italic;
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+}
+
+/* Full field list — one row per field, used when DataEntityCard is
+   expanded. Replaces the pill strip with a scannable table-ish view. */
+.oc-toolcard-fields-full {
+  list-style: none;
+  padding: 6px 0 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.oc-toolcard-field-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.oc-toolcard-field-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reviewer expanded body — wraps the issue list and the reasoning
+   transcript. Extra gap so the two sections read as distinct. */
+.oc-toolcard-expanded-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Sub-reviewer chips — show which focused specialists are running / done
+   as the parent reviewer fans out spawnSubReviewer calls. */
+.oc-review-subs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.oc-review-sub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  text-transform: capitalize;
+}
+.oc-review-sub-chip[data-status="running"] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 10%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent-base) 30%, transparent);
+}
+.oc-review-sub-chip[data-status="error"] {
+  color: var(--state-error);
+  background: color-mix(in oklch, var(--state-error) 10%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--state-error) 30%, transparent);
+}
+.oc-review-sub-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.oc-review-sub-chip[data-status="running"] .oc-review-sub-dot {
+  animation: oc-sub-pulse 900ms ease-out infinite;
+}
+.oc-review-sub-count {
+  margin-left: 2px;
+  padding: 0 5px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--surface-1);
+  border-radius: 999px;
+}
+@keyframes oc-sub-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* Progressive `think` chips emitted by the reviewer during its run. */
+.oc-review-thinks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.oc-review-think {
+  display: flex;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  background: var(--surface-0);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-review-think-topic {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+.oc-review-think-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Issue list inside ReviewScreenCard — each issue is a small card with a
+   severity-tinted left edge. Categories + locations are secondary,
+   problem is the headline, fix is the action the orchestrator would
+   take. */
+.oc-review-issues {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oc-review-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  border-left: 3px solid var(--border-subtle);
+}
+.oc-review-issue[data-severity="high"] {
+  border-left-color: var(--state-error);
+}
+.oc-review-issue[data-severity="medium"] {
+  border-left-color: color-mix(
+    in oklch,
+    var(--accent-base) 80%,
+    var(--state-error)
+  );
+}
+.oc-review-issue[data-severity="low"] {
+  border-left-color: color-mix(
+    in oklch,
+    var(--accent-base) 60%,
+    transparent
+  );
+}
+.oc-review-issue-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.oc-review-issue-sev {
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklch, var(--border-subtle) 60%, transparent);
+  color: var(--text-secondary);
+}
+.oc-review-issue-sev[data-severity="high"] {
+  background: color-mix(in oklch, var(--state-error) 18%, transparent);
+  color: var(--state-error);
+}
+.oc-review-issue-sev[data-severity="medium"] {
+  background: color-mix(in oklch, var(--accent-base) 14%, transparent);
+  color: var(--accent-base);
+}
+.oc-review-issue-cat {
+  font-weight: 500;
+}
+.oc-review-issue-loc {
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.oc-review-issue-problem {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.oc-review-issue-fix {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.oc-review-issue-fix-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-base);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+}
+.oc-review-reasoning-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.oc-review-reasoning-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Rolling tail of the code as it streams in — fades from top so only the
+   most recent lines read sharply. Last line gets a subtle accent to signal
+   "this is what's happening right now." */
+.oc-toolcard-code {
+  margin: 8px 0 0 0;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0;
+  background: var(--surface-0);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  overflow: hidden;
+  white-space: pre;
+  max-height: 84px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.5) 14px,
+    #000 36px
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.5) 14px,
+    #000 36px
+  );
+}
+.oc-toolcard-code-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-toolcard-code-line:last-child {
+  color: var(--text-secondary);
+}
+.oc-toolcard--muted {
+  opacity: 0.72;
+}
+.oc-toolcard--muted:not(:hover) {
+  background: var(--surface-0);
+}
+
+/* Viewport-ratio thumbnail shown on streaming / done / error */
+.oc-toolcard-thumb {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  overflow: hidden;
+  position: relative;
+}
+.oc-toolcard-thumb--streaming {
+  background: color-mix(in oklch, var(--accent-base) 16%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 40%, transparent);
+}
+.oc-toolcard-thumb--done {
+  background: color-mix(in oklch, var(--state-success) 14%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--state-success) 35%, transparent);
+}
+.oc-toolcard-thumb--error {
+  background: color-mix(in oklch, var(--state-error) 14%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--state-error) 35%, transparent);
+}
+.oc-toolcard-thumb-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-toolcard-thumb--streaming .oc-toolcard-thumb-label {
+  color: var(--accent-base);
+}
+.oc-toolcard-thumb--done .oc-toolcard-thumb-label {
+  color: var(--state-success);
+}
+.oc-toolcard-thumb--error .oc-toolcard-thumb-label {
+  color: var(--state-error);
+}
+
+/* Live streaming sparkline — follows the status-row's current color */
+.oc-toolcard-spark {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 2px;
+  opacity: 0.85;
+}
+
+/* Diff stats (+N / −M / N lines) */
+.oc-toolcard-diff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.oc-toolcard-diff-add {
+  color: var(--state-success);
+}
+.oc-toolcard-diff-rem {
+  color: var(--state-error);
+}
+.oc-toolcard-diff-neutral {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* Retry group — primary card with an "N attempts" pill that reveals history */
+.oc-toolgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oc-toolgroup-head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-toolgroup-badge {
+  position: absolute;
+  top: -8px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 2px 4px -2px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-toolgroup-badge:hover {
+    color: var(--text-primary);
+    background: var(--surface-3);
+  }
+}
+.oc-toolgroup-caret {
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 180ms ease-out;
+  display: inline-block;
+  transform: rotate(0deg);
+}
+.oc-toolgroup-caret[data-open] {
+  transform: rotate(90deg);
+}
+.oc-toolgroup-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: var(--border-hairline) solid var(--border-subtle);
+  margin-left: 12px;
+}
+
+/* Tool call chips (theme-aware) */
+.oc-msg-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.oc-msg-tool--streaming {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 12%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 45%, transparent);
+}
+.oc-msg-tool--error {
+  color: var(--state-error);
+  background: var(--state-error-subtle);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--state-error) 32%, transparent);
+}
+
+/* Inline annotation-reference chip in rendered chat markdown. Matches the
+   red pin accent from agentation so a `#1` in a message reads clearly as
+   "click on the pin labelled 1." */
+.oc-pin-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(229, 72, 77, 0.14);
+  color: #ff7a80;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
+  margin: 0 1px;
+  box-shadow: inset 0 0 0 1px rgba(229, 72, 77, 0.3);
+  vertical-align: middle;
+}
+[data-theme="light"] .oc-pin-ref {
+  background: rgba(229, 72, 77, 0.1);
+  color: #c03338;
+  box-shadow: inset 0 0 0 1px rgba(229, 72, 77, 0.28);
+}
+
+/* Composer-below row showing which pins the current message references.
+   Users see context before pressing send. */
+.oc-pin-refs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+  margin-top: 2px;
+}
+.oc-pin-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 2px;
+  height: 22px;
+  border-radius: 11px;
+  background: color-mix(in oklch, var(--surface-2) 80%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.oc-pin-ref-chip-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.oc-pin-ref-chip-el {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Annotation-reference popover shown above the composer while typing #N */
+.oc-pin-autocomplete {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: 14px;
+  padding: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 10px 30px -12px rgba(0, 0, 0, 0.45),
+    0 24px 48px -20px rgba(0, 0, 0, 0.38);
+  font-family: var(--font-ui);
+  z-index: 10;
+}
+
+/* @screen picker — same shell as the annotation popover but three
+   columns (slug / name / viewport). Mirrors the slash-command popover's
+   visual weight so all three mention systems feel like siblings. */
+.oc-screen-autocomplete {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: 14px;
+  padding: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 10px 30px -12px rgba(0, 0, 0, 0.45),
+    0 24px 48px -20px rgba(0, 0, 0, 0.38);
+  font-family: var(--font-ui);
+  z-index: 10;
+}
+.oc-screen-autocomplete-head {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-screen-autocomplete-item {
+  display: grid;
+  grid-template-columns: 96px auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 100ms ease-out, color 100ms ease-out;
+}
+.oc-screen-autocomplete-item[data-active] {
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+  color: var(--text-primary);
+}
+.oc-screen-autocomplete-slug {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-screen-autocomplete-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-screen-autocomplete-viewport {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* Screen-reference chip below the composer — reuses the pin chip shell
+   but pushes the color palette toward accent so @screen and #pin read
+   as related-but-distinct reference types. */
+.oc-pin-ref-chip--screen {
+  background: color-mix(in oklch, var(--accent-base) 10%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent-base) 25%, var(--border-subtle));
+}
+.oc-pin-ref-chip-num--screen {
+  background: color-mix(in oklch, var(--accent-base) 90%, transparent);
+  color: var(--accent-on);
+}
+
+/* Slash-command popover — similar layout to the annotation popover, but
+   three columns (slug / label / hint) and a keyboard-hint footer so
+   first-timers know Enter picks and Esc cancels. */
+.oc-slash-autocomplete {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: 14px;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 10px 30px -12px rgba(0, 0, 0, 0.45),
+    0 24px 48px -20px rgba(0, 0, 0, 0.38);
+  font-family: var(--font-ui);
+  z-index: 10;
+}
+.oc-slash-autocomplete-head {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-slash-autocomplete-item {
+  display: grid;
+  grid-template-columns: 72px auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 100ms ease-out, color 100ms ease-out;
+}
+.oc-slash-autocomplete-item[data-active] {
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+  color: var(--text-primary);
+}
+.oc-slash-autocomplete-slug {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-base);
+  white-space: nowrap;
+}
+.oc-slash-autocomplete-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.oc-slash-autocomplete-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-slash-autocomplete-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+}
+.oc-slash-autocomplete-foot kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-slash-autocomplete-foot span + kbd {
+  margin-left: 8px;
+}
+.oc-pin-autocomplete-head {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-pin-autocomplete-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+.oc-pin-autocomplete-item[data-active] {
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+  color: var(--text-primary);
+}
+.oc-pin-autocomplete-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.oc-pin-autocomplete-el {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-pin-autocomplete-cm {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Composer — Claude Code–style layout
+   Two-part structure: rounded input pill with an inline stop/send button,
+   followed by a transparent toolbar row below. See ChatPanel.tsx → the
+   form uses .oc-composer as the outer wrapper.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-composer-pill {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 44px 10px 14px;
+  border-radius: 18px;
+  background: var(--chat-composer-bg);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 2px 8px -2px rgba(0, 0, 0, 0.14);
+  transition: box-shadow 150ms ease-out;
+}
+.oc-composer-pill:focus-within {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent-base) 55%, transparent),
+    0 2px 14px -2px color-mix(in oklch, var(--accent-base) 24%, transparent);
+}
+.oc-composer textarea {
+  width: 100%;
+  min-height: 24px;
+  max-height: 160px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 4px 2px;
+  field-sizing: content;
+}
+.oc-composer textarea::placeholder {
+  color: var(--text-tertiary);
+}
+.oc-composer textarea:disabled {
+  opacity: 0.7;
+  cursor: text;
+}
+.oc-composer-action {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+@media (hover: hover) {
+  .oc-composer-action:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+.oc-composer-action:active { transform: translateY(0.5px); }
+.oc-composer-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-composer-action[data-variant="send"]:not(:disabled) {
+  background: var(--text-primary);
+  color: var(--surface-1);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .oc-composer-action[data-variant="send"]:not(:disabled):hover {
+    background: color-mix(in oklch, var(--text-primary) 90%, transparent);
+  }
+}
+.oc-composer-action[data-variant="stop"]:not(:disabled) {
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.oc-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+.oc-composer-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.oc-composer-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-composer-tool:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+.oc-composer-tool:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.oc-composer-tool[data-on] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 10%, transparent);
+}
+@media (hover: hover) {
+  .oc-composer-tool[data-on]:hover {
+    background: color-mix(in oklch, var(--accent-base) 16%, transparent);
+    color: var(--accent-base);
+  }
+}
+.oc-composer-tool-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 2px;
+  user-select: none;
+}
+/* Project brief panel — full-height column inside the chat aside with
+   header, toolbar, and a flex-growing body that hosts either rendered
+   markdown (view mode) or a markdown textarea (edit mode). Matches the
+   same flex pattern as .oc-notes so both panels feel like siblings. */
+.oc-project-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.oc-project-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  box-shadow: inset 0 -1px 0 0 var(--border-subtle);
+  flex: 0 0 auto;
+}
+.oc-project-head-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.oc-project-title {
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+}
+.oc-project-subtitle {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.35;
+}
+.oc-project-subtitle code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.oc-project-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.oc-project-state[data-state="established"] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent-base) 30%, transparent);
+}
+.oc-project-state[data-state="empty"] {
+  color: var(--state-warn);
+  background: color-mix(in oklch, var(--state-warn) 14%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--state-warn) 30%, transparent);
+}
+/* "Seeded" state — design.md ships pre-populated from the embedded
+   skills. Reads as neutral-positive (subtle tertiary tint) to distinguish
+   it from the accent-colored "Established" and warn-tinted "Empty". */
+.oc-project-state[data-state="seeded"] {
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-project-state[data-state="seeded"] .oc-project-state-dot {
+  background: var(--text-tertiary);
+}
+.oc-project-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.oc-project-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 -1px 0 0 var(--border-subtle);
+}
+.oc-project-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-project-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .oc-project-btn:hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
+  }
+}
+.oc-project-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.oc-project-btn--primary {
+  background: var(--accent-base);
+  color: var(--accent-on);
+  box-shadow: none;
+  font-weight: 600;
+}
+@media (hover: hover) {
+  .oc-project-btn--primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+}
+.oc-project-btn--primary:disabled {
+  background: var(--surface-3);
+  color: var(--text-tertiary);
+}
+
+.oc-project-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 16px;
+  overflow: hidden;
+}
+.oc-project-rendered {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 2px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+/* Nicer typographic rhythm for the rendered project.md — denser than
+   chat bubbles, looser than the raw textarea. */
+.oc-project-rendered h1,
+.oc-project-rendered h2,
+.oc-project-rendered h3 {
+  margin: 16px 0 6px;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+.oc-project-rendered h1:first-child,
+.oc-project-rendered h2:first-child,
+.oc-project-rendered h3:first-child {
+  margin-top: 0;
+}
+.oc-project-rendered h1 {
+  font-size: 18px;
+  font-weight: 700;
+}
+.oc-project-rendered h2 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.oc-project-rendered h2:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.oc-project-rendered h3 {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.oc-project-rendered p {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+}
+.oc-project-rendered ul,
+.oc-project-rendered ol {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+.oc-project-rendered li {
+  margin: 2px 0;
+}
+.oc-project-rendered li::marker {
+  color: var(--text-tertiary);
+}
+.oc-project-rendered code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+.oc-project-rendered pre {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+.oc-project-rendered blockquote {
+  border-left: 2px solid var(--border-strong);
+  padding: 2px 0 2px 10px;
+  margin: 6px 0 12px;
+  color: var(--text-tertiary);
+}
+.oc-project-rendered strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.oc-project-rendered a {
+  color: var(--accent-base);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.oc-project-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+.oc-project-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.oc-project-empty-body {
+  max-width: 340px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.oc-project-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: none;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+  tab-size: 2;
+}
+.oc-project-editor:focus {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent-base) 50%, transparent);
+}
+.oc-project-editor::placeholder {
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+}
+/* Lint findings list — stacked rows, severity chip on the left, path
+   + message on the right, optional contrast-sample chip below. */
+.oc-project-lint-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-project-lint-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface-1);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-project-lint-row[data-severity="error"] {
+  box-shadow:
+    inset 0 0 0 1px
+      color-mix(in oklch, var(--state-error) 40%, transparent);
+}
+.oc-project-lint-row[data-severity="warning"] {
+  box-shadow:
+    inset 0 0 0 1px
+      color-mix(in oklch, var(--state-warning) 40%, transparent);
+}
+.oc-project-lint-sev {
+  justify-self: start;
+  align-self: start;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+}
+.oc-project-lint-sev[data-severity="error"] {
+  color: var(--state-error);
+  background: color-mix(in oklch, var(--state-error) 14%, transparent);
+}
+.oc-project-lint-sev[data-severity="warning"] {
+  color: var(--state-warning);
+  background: color-mix(
+    in oklch,
+    var(--state-warning) 14%,
+    transparent
+  );
+}
+.oc-project-lint-sev[data-severity="info"] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+}
+.oc-project-lint-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.oc-project-lint-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: -0.01em;
+}
+.oc-project-lint-msg {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+.oc-project-lint-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.oc-project-lint-swatch span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-project-lint-swatch code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.oc-project-lint-empty {
+  padding: 40px 8px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.oc-project-lint-empty--error {
+  color: var(--state-error);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+/* YAML preview — same full-height surface as the markdown editor, but
+   code-styled so it's visually distinct from the prose view. */
+.oc-project-yaml {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* Live-updating token counter rendered next to the Think toggle. Replaces
+   the old status dot; the counter's left edge carries a tiny indicator
+   that reflects busy / queued / idle state so we don't lose the signal. */
+.oc-composer-token-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 8px 0 10px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  position: relative;
+  line-height: 22px;
+  white-space: nowrap;
+  user-select: none;
+  cursor: help;
+}
+.oc-composer-token-counter::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.oc-composer-token-counter[data-state="busy"]::before {
+  background: var(--accent-base);
+  animation: oc-composer-status-pulse 1200ms ease-out infinite;
+}
+.oc-composer-token-counter[data-state="queued"]::before {
+  background: var(--state-warn);
+}
+.oc-composer-token-counter-num {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-composer-token-counter-label {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+@keyframes oc-composer-status-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent-base) 60%, transparent); }
+  70% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent-base) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent-base) 0%, transparent); }
+}
+
+/* Reset button in the chat header — subtle ghost button, bumps to
+   error tint on hover so the destructive nature is legible. */
+.oc-header-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-header-reset:hover {
+    background: color-mix(in oklch, var(--state-error) 12%, transparent);
+    color: var(--state-error);
+  }
+}
+
+/* Queued-message pills shown above the composer while the agent is busy. */
+.oc-composer-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+.oc-composer-queue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 6px 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-composer-queue-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.oc-composer-queue-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  background: transparent;
+}
+@media (hover: hover) {
+  .oc-composer-queue-chip-remove:hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
+  }
+}
+.oc-composer-queue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--state-warn);
+  background: color-mix(in oklch, var(--state-warn) 14%, transparent);
+  border-radius: 999px;
+}
+
+.oc-composer-attach-row {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+.oc-composer-attach {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-composer-attach img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Legacy classes — kept as aliases so any stray .oc-composer-btn /
+   .oc-composer-send references still render without visual regression. */
+.oc-composer-btn { all: revert; }
+.oc-composer-row { display: none; }
+.oc-composer-send { display: none; }
+
+/* Composer popover (model picker) */
+.oc-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 240px;
+  max-width: 280px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 12px 28px -8px rgba(0, 0, 0, 0.2),
+    0 24px 56px -16px rgba(0, 0, 0, 0.22);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.oc-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-popover-item:hover {
+    background: var(--surface-2);
+  }
+}
+.oc-popover-item[data-active] {
+  background: color-mix(in oklch, var(--accent-base) 12%, var(--surface-1));
+}
+.oc-popover-item-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.oc-popover-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.oc-popover-item-desc {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.3;
+}
+
+/* "Think" toggle — active state lights up in accent */
+.oc-thinking-toggle[data-on] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+}
+@media (hover: hover) {
+  .oc-thinking-toggle[data-on]:hover {
+    background: color-mix(in oklch, var(--accent-base) 18%, transparent);
+    color: var(--accent-base);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Dialkit theme overrides — re-point Dialkit's tokens at our surface
+   variables so the Inspector panel matches the rest of the app in both
+   light + dark. Dialkit's defaults assume a dark glassmorphic panel; we
+   neutralize that for light mode and slim the vertical rhythm a bit.
+   ────────────────────────────────────────────────────────────────────────── */
+.dialkit-root {
+  --dial-surface: color-mix(in oklch, var(--text-primary) 5%, transparent);
+  --dial-surface-hover: color-mix(in oklch, var(--text-primary) 8%, transparent);
+  --dial-surface-active: color-mix(in oklch, var(--text-primary) 10%, transparent);
+  --dial-surface-subtle: color-mix(in oklch, var(--text-primary) 4%, transparent);
+
+  --dial-text-root: var(--text-primary);
+  --dial-text-section: var(--text-tertiary);
+  --dial-text-label: var(--text-tertiary);
+  --dial-text-focus: var(--text-primary);
+  --dial-text-primary: var(--text-primary);
+  --dial-text-secondary: var(--text-secondary);
+  --dial-text-tertiary: var(--text-tertiary);
+
+  --dial-border: var(--border-subtle);
+  --dial-border-hover: var(--border-strong);
+
+  --dial-glass-bg: transparent;
+  --dial-dropdown-bg: var(--surface-1);
+  --dial-backdrop-blur: 0px;
+  --dial-radius: var(--radius-sm);
+  --dial-row-height: 30px;
+  --dial-shadow: none;
+  --dial-shadow-collapsed: none;
+  --dial-shadow-dropdown:
+    0 0 0 1px var(--border-subtle),
+    0 8px 20px -6px rgba(0, 0, 0, 0.18);
+
+  font-family: var(--font-ui);
+}
+.dialkit-panel {
+  /* Anchor to the top-right of the canvas region, sitting just inside the
+     10px canvas inset with a little extra breathing room. */
+  top: 22px !important;
+  right: 22px !important;
+}
+
+/* Tokens panel inside the left-panel "Tokens" tab. Project-wide design
+   tokens (colors, spacing, radii, font sizes) that the AI references by
+   CSS-var name instead of baking in raw values. */
+.oc-tokens {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.oc-tokens-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.oc-tokens-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-tokens-reset {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-tokens-reset:hover {
+    color: var(--text-primary);
+    background: var(--surface-2);
+  }
+}
+.oc-tokens-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oc-tokens-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.oc-tokens-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+.oc-tokens-add {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-base);
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-tokens-add:hover {
+    background: color-mix(in oklch, var(--accent-base) 12%, transparent);
+  }
+}
+.oc-tokens-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-tokens-empty {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding: 4px 0;
+}
+.oc-tokens-row {
+  display: grid;
+  grid-template-columns: 22px 1fr 90px 20px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+/* Color rows get a 2nd value column so light + dark are editable in place. */
+.oc-tokens-row--color {
+  grid-template-columns: 40px 1fr 78px 78px 20px;
+}
+/* Typography rows have 5 value fields: family / size / weight / lh / tracking.
+   Family gets the widest share; size/weight/lh/tracking are narrow.
+   The preview "Aa" swatch renders the actual style so edits are visible at a
+   glance without toggling anything. */
+.oc-tokens-row--typography {
+  grid-template-columns: 40px 92px minmax(0, 1fr) 54px 42px 44px 48px 20px;
+  align-items: center;
+}
+.oc-tokens-swatch--typography {
+  width: 40px;
+  height: 28px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-size: 14px !important;
+  font-weight: inherit !important;
+}
+.oc-tokens-typography-field {
+  min-width: 0;
+  font-size: 11px;
+}
+.oc-tokens-typography-size,
+.oc-tokens-typography-weight,
+.oc-tokens-typography-lh,
+.oc-tokens-typography-tracking {
+  text-align: center;
+}
+.oc-tokens-dual-swatch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  display: inline-flex;
+}
+.oc-tokens-swatch--half {
+  width: 20px;
+  height: 22px;
+  box-shadow: none;
+  border-radius: 0;
+  position: relative;
+  overflow: hidden;
+}
+.oc-tokens-swatch--half + .oc-tokens-swatch--half {
+  box-shadow: inset 1px 0 0 0 var(--border-subtle);
+}
+.oc-tokens-value--light,
+.oc-tokens-value--dark {
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+}
+.oc-tokens-group-hint {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-tokens-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  position: relative;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.oc-tokens-swatch--meta {
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: default;
+}
+.oc-tokens-swatch input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+}
+.oc-tokens-name,
+.oc-tokens-value {
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: none;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+  transition: box-shadow 120ms ease-out;
+}
+.oc-tokens-value {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.oc-tokens-name:focus,
+.oc-tokens-value:focus {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 60%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--accent-base) 22%, transparent);
+}
+.oc-tokens-remove {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-tokens-remove:hover {
+    color: var(--state-error);
+    background: color-mix(in oklch, var(--state-error) 14%, transparent);
+  }
+}
+
+/* ─── Icons tab ────────────────────────────────────────────────────────
+ * Reuses the general design language of the Tokens tab (.oc-tokens-*) for
+ * consistency — the two tabs are siblings in the mental model (project
+ * defaults) and should look like it. Grid of icon cells renders previews
+ * at the user's configured size + color.
+ */
+.oc-icons {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.oc-icons-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+.oc-icons-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-icons-total {
+  flex: 1;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-icons-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 4px 14px 10px;
+}
+.oc-icons-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.oc-icons-control--wide {
+  flex: 1;
+  min-width: 200px;
+}
+.oc-icons-control-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.oc-icons-control-unit {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.oc-icons-segmented {
+  display: inline-flex;
+  background: var(--surface-1);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  padding: 2px;
+}
+.oc-icons-segmented-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.oc-icons-segmented-btn[data-active="true"] {
+  background: var(--surface-elevated, var(--surface-2));
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.oc-icons-size {
+  width: 54px;
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: none;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+}
+.oc-icons-color {
+  flex: 1;
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: none;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+}
+.oc-icons-size:focus,
+.oc-icons-color:focus {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 60%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--accent-base) 22%, transparent);
+}
+.oc-icons-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 10px;
+  border-bottom: var(--border-hairline) solid var(--border-subtle);
+}
+.oc-icons-search {
+  height: 28px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: none;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+}
+.oc-icons-search:focus {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 60%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--accent-base) 22%, transparent);
+}
+.oc-icons-cats {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 0 2px;
+  scrollbar-width: thin;
+}
+.oc-icons-cat {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition: background 120ms, color 120ms;
+}
+.oc-icons-cat-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-icons-cat[data-active="true"] {
+  background: color-mix(in oklch, var(--accent-base) 14%, transparent);
+  color: var(--accent-base);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent-base) 40%, transparent);
+}
+.oc-icons-cat[data-active="true"] .oc-icons-cat-count {
+  color: var(--accent-base);
+}
+@media (hover: hover) {
+  .oc-icons-cat:hover {
+    color: var(--text-primary);
+    background: var(--surface-1);
+  }
+}
+.oc-icons-grid-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+}
+.oc-icons-empty {
+  padding: 40px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.oc-icons-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 4px;
+}
+.oc-icons-cell {
+  display: contents;
+}
+.oc-icons-cell-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms;
+  text-align: center;
+  min-height: 66px;
+  /* Virtualize rendering for up to 1970 cells: the browser skips layout
+     + paint for cells outside the viewport while still reserving their
+     space. Intrinsic-size matches the min-height so scroll geometry is
+     accurate from the first frame. */
+  content-visibility: auto;
+  contain-intrinsic-size: 66px 66px;
+}
+@media (hover: hover) {
+  .oc-icons-cell-btn:hover {
+    background: var(--surface-1);
+  }
+}
+.oc-icons-cell-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-primary);
+}
+.oc-icons-missing {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+.oc-icons-cell-name {
+  font-size: 9.5px;
+  line-height: 1.15;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Components tab — two-column: list (left) + editor pane (right). */
+.oc-components {
+  flex: 1 1 auto;
+  display: grid;
+  /* Sidebar bumped from 150px → 200px so component names + 2-line
+     descriptions fit without aggressive truncation (e.g. "SegmentedControl"
+     and "iOS segmented picker — active pill…" both readable). */
+  grid-template-columns: 200px 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+.oc-components-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 8px 10px 12px;
+  border-right: var(--border-hairline) solid var(--border-subtle);
+  overflow-y: auto;
+}
+.oc-components-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.oc-components-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.oc-components-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-components-item:hover {
+    background: var(--surface-2);
+  }
+}
+.oc-components-item[data-selected] {
+  background: color-mix(in oklch, var(--accent-base) 14%, var(--surface-1));
+}
+.oc-components-item-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.oc-components-item-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-components-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+.oc-components-meta {
+  display: flex;
+  gap: 6px;
+}
+.oc-components-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.oc-components-desc {
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+.oc-components-remove {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  padding: 2px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .oc-components-remove:hover {
+    color: var(--state-error);
+    background: color-mix(in oklch, var(--state-error) 14%, transparent);
+  }
+}
+.oc-components-code {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.oc-components-code .oc-code-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* CodeMirror container + scroller must also flex so the editor fills the
+   entire vertical space available inside the Components tab. */
+.oc-code-editor[data-fill] > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.oc-code-editor[data-fill] .cm-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.oc-code-editor[data-fill] .cm-scroller {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.oc-components-empty {
+  padding: 20px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* Live Sandpack preview below the code editor. Height comes from the
+   parent inline `style.height` (driven by ComponentsPanel state +
+   PreviewResizer drag handle). Defaults to 220px on first load. */
+.oc-components-preview {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+  margin-top: 4px;
+}
+/* Drag handle — sits above the preview head, full-width grab bar. */
+.oc-components-preview-resizer {
+  position: relative;
+  height: 10px;
+  margin: 0 -2px;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+}
+.oc-components-preview-resizer::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+.oc-components-preview-resizer-grip {
+  width: 28px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  opacity: 0.4;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+@media (hover: hover) {
+  .oc-components-preview-resizer:hover .oc-components-preview-resizer-grip,
+  .oc-components-preview-resizer:focus-visible .oc-components-preview-resizer-grip {
+    opacity: 0.9;
+    background: var(--accent-base);
+  }
+}
+.oc-components-preview-resizer:focus {
+  outline: none;
+}
+.oc-components-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 2px 4px;
+}
+.oc-components-preview-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-components-preview-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-components-preview-frame .sp-wrapper,
+.oc-components-preview-frame .sp-layout,
+.oc-components-preview-frame .sp-preview,
+.oc-components-preview-frame .sp-preview-container {
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+}
+
+/* Data panel — field editor and seed-row table. Mirrors the overall Services
+   layout but adds a two-up section stack inside the right pane. */
+.oc-data-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.oc-data-section:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+.oc-data-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+  font: 500 11px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.oc-data-section-add {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font: 500 11px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-data-section-add:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+.oc-data-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-data-field {
+  display: grid;
+  grid-template-columns: 1fr 110px 24px;
+  gap: 6px;
+  align-items: center;
+}
+.oc-data-field input,
+.oc-data-field select {
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+  transition: box-shadow 120ms ease-out;
+}
+.oc-data-field input:focus,
+.oc-data-field select:focus {
+  box-shadow: inset 0 0 0 1px var(--accent-base);
+}
+.oc-data-field-remove,
+.oc-data-row-remove {
+  width: 22px;
+  height: 22px;
+  justify-self: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: 500 14px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-data-field-remove:hover,
+  .oc-data-row-remove:hover {
+    background: color-mix(in oklch, var(--state-error) 14%, transparent);
+    color: var(--state-error);
+  }
+}
+.oc-data-table {
+  display: grid;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  overflow-x: auto;
+}
+.oc-data-cell-head {
+  font: 500 10px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 2px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.oc-data-cell {
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  outline: none;
+  transition: box-shadow 120ms ease-out;
+  min-width: 0;
+}
+.oc-data-cell:focus {
+  box-shadow: inset 0 0 0 1px var(--accent-base);
+}
+.oc-data-cell--bool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Chat markdown — styles applied to assistant/user message text when
+ * rendered via react-markdown. Scoped under .oc-md so it doesn't leak
+ * to the inspector / principles panels / other markdown surfaces.
+ * (HMR touch — Turbopack occasionally caches past appends.) */
+.oc-md {
+  color: inherit;
+  line-height: 1.55;
+  word-wrap: break-word;
+}
+.oc-md > *:first-child { margin-top: 0; }
+.oc-md > *:last-child { margin-bottom: 0; }
+.oc-md p {
+  margin: 0 0 8px;
+}
+.oc-md p + p {
+  margin-top: 0;
+}
+.oc-md h1,
+.oc-md h2,
+.oc-md h3,
+.oc-md h4 {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  margin: 14px 0 6px;
+  color: var(--text-primary);
+}
+.oc-md h1 { font-size: 18px; }
+.oc-md h2 { font-size: 15px; }
+.oc-md h3 { font-size: 14px; }
+.oc-md h4 { font-size: 13px; color: var(--text-secondary); }
+.oc-md ul,
+.oc-md ol {
+  margin: 6px 0 10px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.oc-md ul { list-style: disc; }
+.oc-md ol { list-style: decimal; }
+.oc-md li { margin: 0; }
+.oc-md li > p { display: inline; margin: 0; }
+/* Task-list items (GFM) — no bullet, checkbox inline. */
+.oc-md li input[type="checkbox"] {
+  margin-right: 6px;
+  transform: translateY(1px);
+}
+.oc-md strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.oc-md em {
+  font-style: italic;
+}
+.oc-md del {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+.oc-md blockquote {
+  margin: 8px 0;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--border-default);
+  color: var(--text-secondary);
+}
+.oc-md hr {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.oc-md-link {
+  color: var(--accent-base);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklch, var(--accent-base) 30%, transparent);
+  transition: border-color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-md-link:hover {
+    border-bottom-color: var(--accent-base);
+  }
+}
+.oc-md-icode {
+  font: 400 12px/1 ui-monospace, SF Mono, Menlo, monospace;
+  padding: 1px 5px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-md-code {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  overflow-x: auto;
+  max-width: 100%;
+}
+.oc-md-code code {
+  font: 400 11px/1.55 ui-monospace, SF Mono, Menlo, monospace;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+.oc-md table {
+  margin: 8px 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.oc-md th,
+.oc-md td {
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+}
+.oc-md th {
+  background: var(--surface-2);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Project notes — orchestrator's durable scratchpad, grouped by category. */
+.oc-notes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 0;
+}
+.oc-notes-head {
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.oc-notes-title {
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
+}
+.oc-notes-subtitle {
+  margin-top: 4px;
+  font: 400 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+}
+.oc-notes-group {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.oc-notes-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 4px;
+}
+.oc-notes-group-label {
+  font: 500 10px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.oc-notes-group-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.oc-notes-group-add {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font: 500 13px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-notes-group-add:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+.oc-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.oc-notes-item {
+  border-top: 1px solid var(--border-subtle);
+}
+.oc-notes-item:first-child {
+  border-top: 0;
+}
+.oc-notes-item-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background-color 100ms ease-out;
+}
+@media (hover: hover) {
+  .oc-notes-item-head:hover {
+    background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+  }
+}
+.oc-notes-caret {
+  color: var(--text-tertiary);
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  transition: transform 160ms ease-out;
+  flex: 0 0 auto;
+}
+.oc-notes-caret[data-open] {
+  transform: rotate(90deg);
+}
+.oc-notes-item-title {
+  flex: 1;
+  font: 500 12.5px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-notes-item-meta {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  flex: 0 0 auto;
+}
+.oc-notes-body {
+  padding: 4px 16px 14px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-notes-md {
+  font: 400 12.5px/1.55 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-secondary);
+}
+.oc-notes-body-actions,
+.oc-notes-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.oc-notes-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent-base);
+  color: var(--accent-on);
+  font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform 100ms ease-out, opacity 100ms ease-out;
+}
+.oc-notes-btn:active {
+  transform: scale(0.97);
+}
+.oc-notes-btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+@media (hover: hover) {
+  .oc-notes-btn--ghost:hover {
+    color: var(--text-primary);
+    background: var(--surface-2);
+  }
+}
+.oc-notes-edit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: 400 12.5px/1.5 ui-sans-serif, system-ui, sans-serif;
+  box-shadow: inset 0 0 0 1px var(--accent-base);
+  outline: none;
+  resize: vertical;
+  min-height: 80px;
+}
+.oc-notes-seed {
+  padding: 20px 16px;
+}
+.oc-notes-seed-hint {
+  font: 400 12px/1.4 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+.oc-notes-seed-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.oc-notes-seed-btn {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition: background-color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-notes-seed-btn:hover {
+    background: color-mix(in oklch, var(--accent-base) 8%, var(--surface-2));
+  }
+}
+
+/* Quick-reply chips emitted by suggestReplies. Inline under the assistant
+ * message text; one click sends the reply as the user's next message. */
+.oc-quickreplies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.oc-quickreply {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition:
+    background-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-quickreply:hover {
+    background: color-mix(in oklch, var(--accent-base) 8%, var(--surface-2));
+    box-shadow: inset 0 0 0 1px var(--accent-base);
+  }
+}
+.oc-quickreply:active {
+  transform: scale(0.97);
+}
+
+/* Clarifying-questions card rendered when the orchestrator calls
+ * askClarifyingQuestions and waits for user answers. Styled as a
+ * low-key panel with tap-pill options and a compact submit button. */
+.oc-quiz {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow:
+    inset 0 0 0 1px var(--border-subtle),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-top: 4px;
+}
+.oc-quiz-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oc-quiz-title {
+  font: 500 12px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-secondary);
+  letter-spacing: -0.005em;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-quiz-progress {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  flex: 0 0 auto;
+}
+.oc-quiz-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+  position: relative;
+}
+.oc-quiz-bar-fill {
+  height: 100%;
+  background: var(--accent-base);
+  border-radius: 2px;
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oc-quiz-option--other {
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.oc-quiz-option--other[data-active] {
+  font-style: normal;
+  color: var(--accent-on);
+}
+.oc-quiz-back {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-quiz-back:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+.oc-quiz-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.oc-quiz-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.oc-quiz-q-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oc-quiz-q-text {
+  font: 500 13px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
+}
+.oc-quiz-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.oc-quiz-option {
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 11px;
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-quiz-option:hover {
+    background: color-mix(in oklch, var(--accent-base) 6%, var(--surface-2));
+  }
+}
+.oc-quiz-option[data-active] {
+  background: var(--accent-base);
+  color: var(--accent-on);
+  box-shadow: inset 0 0 0 1px var(--accent-base);
+}
+.oc-quiz-other-input {
+  height: 32px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--accent-base);
+  color: var(--text-primary);
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  outline: none;
+}
+.oc-quiz-submit {
+  height: 30px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent-base);
+  color: var(--accent-on);
+  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+.oc-quiz-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.oc-quiz-submit:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.oc-quiz--answered {
+  opacity: 0.8;
+}
+.oc-quiz-receipt {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.oc-quiz-receipt li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  font: 400 12px/1.35 ui-sans-serif, system-ui, sans-serif;
+}
+.oc-quiz-receipt .oc-quiz-q {
+  color: var(--text-tertiary);
+  flex: 0 0 auto;
+  max-width: 60%;
+}
+.oc-quiz-receipt .oc-quiz-a {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* Skills tab — list of skill entries with toggles and body previews. */
+.oc-skills {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 0;
+}
+.oc-skills-head {
+  padding: 0 16px 12px;
+}
+.oc-skills-title {
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
+}
+.oc-skills-subtitle {
+  margin-top: 4px;
+  font: 400 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-tertiary);
+}
+.oc-skills-loading,
+.oc-skills-empty {
+  padding: 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.oc-skills-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.oc-skills-row {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-subtle);
+  transition: opacity 120ms ease-out;
+}
+.oc-skills-row:not([data-enabled]) {
+  opacity: 0.55;
+}
+.oc-skills-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.oc-skills-row-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.oc-skills-caret {
+  color: var(--text-tertiary);
+  transition: transform 160ms ease-out;
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+}
+.oc-skills-caret[data-open] {
+  transform: rotate(90deg);
+}
+.oc-skills-name {
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-skills-scope {
+  font: 500 10px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-skills-scope[data-scope="orchestrator"] {
+  color: var(--accent-base);
+  background: color-mix(in oklch, var(--accent-base) 10%, var(--surface-2));
+}
+.oc-skills-scope[data-scope="sub-agent"] {
+  color: var(--state-success, oklch(65% 0.13 150));
+  background: color-mix(in oklch, var(--state-success, oklch(65% 0.13 150)) 12%, var(--surface-2));
+}
+.oc-skills-row-desc {
+  margin-top: 6px;
+  padding-left: 16px;
+  font: 400 12px/1.5 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-secondary);
+}
+.oc-skills-subfiles {
+  margin-top: 8px;
+  padding-left: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.oc-skills-subfile-chip {
+  font: 500 11px/1 ui-mono, "SF Mono", Menlo, monospace;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-skills-body {
+  margin-top: 10px;
+  padding-left: 16px;
+}
+.oc-skills-body-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.oc-skills-body-loading {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.oc-skills-body-preview {
+  font: 400 11px/1.5 ui-mono, "SF Mono", Menlo, monospace;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+/* Toggle switch — small pill with a sliding knob. */
+.oc-skills-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.oc-skills-switch[data-on] {
+  background: var(--accent-base);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 60%, black 0%);
+}
+.oc-skills-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oc-skills-switch[data-on] .oc-skills-switch-knob {
+  transform: translateX(14px);
+}
+
+/* Sidebar layout helpers — match the ServicesPanel/ComponentsPanel
+   structure but layer in skill-specific status indicators + the
+   richer right-pane detail view. */
+.oc-skills-list-count {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.oc-skills-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.oc-skills-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+.oc-skills-status-dot[data-enabled] {
+  background: var(--state-success, oklch(65% 0.13 150));
+  opacity: 1;
+}
+
+.oc-skills-detail {
+  /* Detail pane — replaces the code-editor stack used by Components/
+     Services. Stacks header → metadata sections → body preview, all
+     scrollable as one column. */
+  overflow-y: auto;
+  gap: 14px;
+}
+.oc-skills-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: var(--border-hairline) solid var(--border-subtle);
+}
+.oc-skills-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.oc-skills-detail-title {
+  margin: 0;
+  font: 600 14px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.oc-skills-detail-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.oc-skills-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.oc-skills-detail-toggle-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.oc-skills-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oc-skills-detail-section-head {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-skills-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.oc-skills-trigger-chip {
+  font: 500 10.5px/1 ui-sans-serif, system-ui, sans-serif;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  white-space: nowrap;
+}
+
+/* Instance badge shown at the top of the Dialkit element panel when the
+   selected element's tag matches a component in the library. */
+.oc-instance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklch, var(--accent-base) 12%, var(--surface-1));
+  color: var(--accent-base);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  width: fit-content;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent-base) 30%, transparent);
+}
+.oc-instance-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.oc-instance-badge-label {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+.oc-instance-badge-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+/* Constraint pin-grid portaled into the Dialkit element panel. */
+.oc-constraint-grid {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: var(--border-hairline) solid var(--border-subtle);
+}
+.oc-constraint-grid-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding-bottom: 6px;
+}
+.oc-constraint-grid-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.oc-constraint-pins {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-constraint-pins-row {
+  display: flex;
+  gap: 4px;
+}
+.oc-constraint-pin {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-1);
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  padding: 0;
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-constraint-pin:hover {
+    background: var(--accent-base);
+    box-shadow: inset 0 0 0 1px var(--accent-base);
+    transform: scale(1.12);
+  }
+}
+.oc-constraint-pin:active {
+  transform: scale(0.9);
+}
+.oc-constraint-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oc-constraint-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-constraint-action:hover {
+    color: var(--text-primary);
+    background: var(--surface-3);
+  }
+}
+.oc-constraint-axis-glyph {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.oc-constraint-reset {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Dialkit's action-button is rendered inside the panel via the config's
+   `type: "action"` entry — style it to match our design tokens. */
+.dialkit-root .dialkit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 12px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  width: 100%;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+@media (hover: hover) {
+  .dialkit-root .dialkit-button:hover {
+    color: var(--text-primary);
+    background: var(--surface-3);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+}
+.dialkit-panel-inner {
+  background: var(--surface-1);
+  border: none;
+  backdrop-filter: none;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 8px 24px -6px rgba(0, 0, 0, 0.18),
+    0 20px 56px -14px rgba(0, 0, 0, 0.22);
+  min-width: 260px;
+}
+.dialkit-panel-inline {
+  background: transparent;
+  overflow: visible;
+}
+.dialkit-folder-header {
+  padding: 6px 0;
+}
+.dialkit-folder-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.dialkit-folder-content {
+  padding-bottom: 4px;
+}
+.dialkit-labeled-control {
+  gap: 10px;
+}
+.dialkit-labeled-control-label {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.dialkit-root input,
+.dialkit-root select,
+.dialkit-root button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.dialkit-folder:not(.dialkit-folder-root) + .dialkit-folder:not(.dialkit-folder-root) {
+  border-top: var(--border-hairline) solid var(--border-subtle);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Annotator — replaces the Dialkit element editor when the annotator tool is
+   active and an element is selected. Same top-right slot, but a plain card
+   with a textarea + running history.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-annotator-card {
+  position: fixed;
+  top: 60px;
+  right: calc(var(--right-panel-w) + 16px);
+  z-index: 40;
+  width: 300px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: var(--radius-lg);
+  padding: 14px 14px 12px;
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 8px 24px -6px rgba(0, 0, 0, 0.18),
+    0 20px 56px -14px rgba(0, 0, 0, 0.22);
+  font-family: var(--font-ui);
+}
+.oc-annotator-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.oc-annotator-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.oc-annotator-target {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-base);
+  background: var(--accent-subtle);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.oc-annotator-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-annotator-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.oc-annotator-input:focus {
+  border-color: var(--accent-base);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-base) 18%, transparent);
+}
+.oc-annotator-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.oc-annotator-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.oc-annotator-save {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-on);
+  background: var(--accent-base);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms, transform 100ms;
+}
+.oc-annotator-save:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.oc-annotator-save:disabled {
+  background: var(--surface-3);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+.oc-annotator-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.oc-annotator-entry {
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.oc-annotator-entry-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.oc-annotator-entry-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.oc-annotator-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.oc-annotator-delete:hover {
+  color: var(--state-error);
+  background: var(--state-error-subtle);
+}
+
+/* Tldraw canvas background — match the design system in dark mode. */
+[data-theme="dark"] .tl-background,
+[data-theme="dark"] .tl-container {
+  --color-background: #1e1f20;
+  background-color: #1e1f20;
+}
+
+/* Figma-style snap indicators — always-snap is enabled in TldrawCanvas, and
+   tldraw draws alignment lines in SVG as `.tl-snap-indicator` strokes. Theme
+   to our accent color so the alignment feedback matches the rest of the app
+   instead of tldraw's default blue. */
+.tl-snap-indicator,
+.tl-snap-line {
+  stroke: var(--accent-base) !important;
+  stroke-width: 1.2 !important;
+}
+.tl-snap-point {
+  fill: var(--accent-base) !important;
+  stroke: var(--accent-base) !important;
+}
+/* Tldraw's distance/spacing badges used in snap feedback. */
+.tl-snap-indicator text,
+.tl-snap-distance-label {
+  fill: var(--accent-base) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Theme toggle — segmented sun/moon pill, theme-aware.
+   ────────────────────────────────────────────────────────────────────────── */
+.oc-theme-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 48px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+@media (hover: hover) {
+  .oc-theme-toggle:hover {
+    background: var(--surface-3);
+    color: var(--text-secondary);
+  }
+}
+.oc-theme-toggle-track {
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.oc-theme-toggle-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 0 0 1px var(--border-subtle);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.oc-theme-toggle[data-theme="dark"] .oc-theme-toggle-thumb {
+  transform: translateX(24px);
+}
+.oc-theme-icon {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+.oc-theme-toggle[data-theme="light"] .oc-theme-icon-sun {
+  color: var(--text-primary);
+}
+.oc-theme-toggle[data-theme="light"] .oc-theme-icon-moon {
+  color: var(--text-muted);
+}
+.oc-theme-toggle[data-theme="dark"] .oc-theme-icon-sun {
+  color: var(--text-muted);
+}
+.oc-theme-toggle[data-theme="dark"] .oc-theme-icon-moon {
+  color: var(--text-primary);
+}
+
+/* Tabs inside the LeftPanel */
+.oc-tab {
+  position: relative;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 120ms ease-out;
+}
+.oc-tab[data-active] {
+  color: var(--text-primary);
+}
+.oc-tab[data-active]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 1.5px;
+  background: var(--text-primary);
+  border-radius: 2px;
+}
+@media (hover: hover) {
+  .oc-tab:hover {
+    color: var(--text-secondary);
+  }
+}
+
+/* Small custom scrollbar for the code editor (spec allows this for small scoped
+   scrollers per Emil's guidance). */
+.oc-code-editor .cm-scroller::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.oc-code-editor .cm-scroller::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--text-primary) 14%, transparent);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.oc-code-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--text-primary) 22%, transparent);
+  background-clip: padding-box;
+}
