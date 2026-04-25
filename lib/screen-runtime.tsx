@@ -101,7 +101,6 @@ if (
 }
 
 export function SANDPACK_INDEX_JS_FOR_THEME(theme: "light" | "dark"): string {
-  const bodyBg = theme === "dark" ? "#000000" : "#ffffff";
   const colorScheme = theme === "dark" ? "dark" : "light";
   return `import App from "./App";
 import React from "react";
@@ -122,12 +121,12 @@ resetStyle.textContent = \`
     height: 100% !important;
     width: 100% !important;
     overflow: hidden;
+    background: var(--color-bg-primary) !important;
   }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: ${bodyBg};
   }
   #root {
     display: flex;
@@ -798,6 +797,25 @@ export function buildTokensCss(tokens: DesignTokens): string {
   ].join("\n\n");
 }
 
+/** FNV-1a — short stable id when the emitted `tokens.css` string changes. */
+function fnv1aHash32(input: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+/**
+ * Use in Sandpack `key` so the iframe remounts whenever project tokens change.
+ * Without this, Sandpack can keep a stale bundled `tokens.css` and previews
+ * stay stuck (e.g. white `bg.primary`) after edits in the Tokens panel.
+ */
+export function designTokensSignature(tokens: DesignTokens): string {
+  return fnv1aHash32(buildTokensCss(tokens));
+}
+
 /**
  * Full-bleed Sandpack surface for one screen. Does NOT position itself — the
  * parent (OpenCanvas' shape renderer) is expected to size this to the shape's
@@ -1029,7 +1047,9 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
           // boot script in /index.js sets data-theme imperatively at boot,
           // and HMR doesn't re-execute it. Without the remount, tokens.css
           // [data-theme="dark"] selectors never engage on toggle.
-          key={`${shape.id}:${resetKey}:${theme}`}
+          // Include `designTokensSignature` so edits in the Tokens panel
+          // rebuild Sandpack — otherwise the iframe keeps stale CSS vars.
+          key={`${shape.id}:${resetKey}:${theme}:${designTokensSignature(tokens)}`}
           template="react"
           theme={theme}
           files={{

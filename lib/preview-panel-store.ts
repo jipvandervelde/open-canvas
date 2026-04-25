@@ -34,14 +34,25 @@ export const MIN_SCALE = 0.35;
  *  still shrink below a usable panel. */
 const ABS_MIN_WIDTH = 220;
 const ABS_MIN_HEIGHT = 200;
+/** Stage padding — must match `PreviewPanel` `Stage` Tailwind classes. */
+export const PREVIEW_STAGE_PAD_X_PX = 32; // `px-8`
+export const PREVIEW_STAGE_PAD_TOP_PX = 16; // `pt-4` — less space above the device
+export const PREVIEW_STAGE_PAD_BOTTOM_PX = 32; // `pb-8`
+export const PREVIEW_STAGE_INSET_H = PREVIEW_STAGE_PAD_X_PX * 2;
+export const PREVIEW_STAGE_INSET_V =
+  PREVIEW_STAGE_PAD_TOP_PX + PREVIEW_STAGE_PAD_BOTTOM_PX;
+
 /** Chrome reserved around the device inside the panel: stage padding + aside
  *  insets + header. The aside subtracts 10px from `state.width` for its right
  *  margin (so the CSS var reports total reserved screen space correctly),
  *  so the horizontal budget needs to include that margin or the device ends
  *  up scaled slightly below 1.0 at the "wraps-device" default size. */
-const PANEL_H_PADDING = 42; // 16 stage-left + 16 stage-right + 10 aside right margin
-const PANEL_V_PADDING = 32; // 16 top + 16 bottom
+const PANEL_H_PADDING = PREVIEW_STAGE_INSET_H + 10; // stage L/R + aside margin
+const PANEL_V_PADDING = PREVIEW_STAGE_INSET_V; // stage top + bottom
 const PANEL_HEADER_H = 48;
+
+/** Extra W/H on default + min panel so the device isn’t flush to the stage. */
+const PANEL_LOOSEN = 20;
 
 type State = {
   width: number;
@@ -57,8 +68,8 @@ type Listener = (state: State) => void;
 function defaultSizeFor(id: ViewportPresetId): { w: number; h: number } {
   const d = VIEWPORT_PRESETS_BY_ID[id] ?? VIEWPORT_PRESETS_BY_ID[DEFAULT_VIEWPORT_ID];
   return {
-    w: Math.round(d.width + PANEL_H_PADDING),
-    h: Math.round(d.height + PANEL_V_PADDING + PANEL_HEADER_H),
+    w: Math.round(d.width + PANEL_H_PADDING + PANEL_LOOSEN),
+    h: Math.round(d.height + PANEL_V_PADDING + PANEL_HEADER_H + PANEL_LOOSEN),
   };
 }
 
@@ -68,10 +79,15 @@ function defaultSizeFor(id: ViewportPresetId): { w: number; h: number } {
 function minSizeFor(id: ViewportPresetId): { w: number; h: number } {
   const d = VIEWPORT_PRESETS_BY_ID[id] ?? VIEWPORT_PRESETS_BY_ID[DEFAULT_VIEWPORT_ID];
   return {
-    w: Math.max(ABS_MIN_WIDTH, Math.round(d.width * MIN_SCALE + PANEL_H_PADDING)),
+    w: Math.max(
+      ABS_MIN_WIDTH,
+      Math.round(d.width * MIN_SCALE + PANEL_H_PADDING + PANEL_LOOSEN),
+    ),
     h: Math.max(
       ABS_MIN_HEIGHT,
-      Math.round(d.height * MIN_SCALE + PANEL_V_PADDING + PANEL_HEADER_H),
+      Math.round(
+        d.height * MIN_SCALE + PANEL_V_PADDING + PANEL_HEADER_H + PANEL_LOOSEN,
+      ),
     ),
   };
 }

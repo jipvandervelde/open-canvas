@@ -43,18 +43,64 @@ export const DEFAULT_VIEWPORT_ID: ViewportPresetId = "iphone-17-pro";
 /** Default React component code shown in a freshly-created screen. */
 export const DEFAULT_SCREEN_CODE = `export default function App() {
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'grid',
-      placeItems: 'center',
-      fontFamily: 'system-ui, sans-serif',
-      color: '#71717a',
-      background: '#fafafa',
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 40, fontWeight: 500, color: '#3f3f46' }}>👋</div>
-        <div style={{ fontSize: 20, fontWeight: 500, color: '#3f3f46' }}>Hello World!</div>
-        <div style={{ fontSize: 12, marginTop: 4 }}>Prompt the agent to design something here.</div>
+    <div
+      style={{
+        minHeight: '100vh',
+        boxSizing: 'border-box',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 'var(--space-screen-px)',
+        background: 'var(--color-bg-primary)',
+        color: 'var(--color-fg-secondary)',
+        fontFamily: 'var(--font-body-family)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-display-family)',
+            fontSize: 'var(--font-display-size)',
+            fontWeight: 'var(--font-display-weight)',
+            lineHeight: 'var(--font-display-line-height)',
+            letterSpacing: 'var(--font-display-letter-spacing)',
+            color: 'var(--color-fg-primary)',
+          }}
+        >
+          👋
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-title-family)',
+            fontSize: 'var(--font-title-size)',
+            fontWeight: 'var(--font-title-weight)',
+            lineHeight: 'var(--font-title-line-height)',
+            letterSpacing: 'var(--font-title-letter-spacing)',
+            color: 'var(--color-fg-primary)',
+          }}
+        >
+          Hello World!
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-footnote-family)',
+            fontSize: 'var(--font-footnote-size)',
+            fontWeight: 'var(--font-footnote-weight)',
+            lineHeight: 'var(--font-footnote-line-height)',
+            letterSpacing: 'var(--font-footnote-letter-spacing)',
+            color: 'var(--color-fg-secondary)',
+            maxWidth: '20rem',
+          }}
+        >
+          Prompt the agent to design something here.
+        </div>
       </div>
     </div>
   );

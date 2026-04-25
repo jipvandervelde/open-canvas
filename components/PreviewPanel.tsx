@@ -11,6 +11,8 @@ import { useEditorRef } from "@/lib/editor-context";
 import {
   previewPanelStore,
   COLLAPSED_WIDTH,
+  PREVIEW_STAGE_INSET_H,
+  PREVIEW_STAGE_INSET_V,
   type PreviewZoomMode,
 } from "@/lib/preview-panel-store";
 import {
@@ -57,6 +59,7 @@ import {
   buildServiceFiles,
   buildDataFiles,
   buildTokensCss,
+  designTokensSignature,
   type ScreenShape,
 } from "@/components/ScreenShapeUtil";
 import { DeviceChrome } from "@/components/DeviceChrome";
@@ -210,10 +213,7 @@ function Header({
   return (
     <header
       className="flex items-center gap-2 px-3 py-2.5"
-      style={{
-        boxShadow: "inset 0 -1px 0 0 var(--border-subtle)",
-        minHeight: 44,
-      }}
+      style={{ minHeight: 44 }}
     >
       <span
         className="text-[13px] font-semibold"
@@ -319,13 +319,13 @@ function Stage({
   // Measure the stage so "fit" mode can compute a scale that keeps the full
   // device visible. "actual" mode ignores this and renders at scale 1, with
   // the stage scrolling when the device overflows.
+  // Insets must match the Stage’s asymmetric padding (see `preview-panel-store`).
   useLayoutEffect(() => {
     if (!stageRef.current) return;
     const el = stageRef.current;
     const ro = new ResizeObserver(() => {
-      const pad = 32;
-      const aw = Math.max(0, el.clientWidth - pad);
-      const ah = Math.max(0, el.clientHeight - pad);
+      const aw = Math.max(0, el.clientWidth - PREVIEW_STAGE_INSET_H);
+      const ah = Math.max(0, el.clientHeight - PREVIEW_STAGE_INSET_V);
       if (aw <= 0 || ah <= 0) return;
       const s = Math.min(1, aw / device.width, ah / device.height);
       setFitScale(s > 0 ? s : 1);
@@ -340,9 +340,9 @@ function Stage({
   return (
     <div
       ref={stageRef}
-      className="flex-1 min-h-0 min-w-0 p-4"
+      className="flex-1 min-h-0 min-w-0 px-8 pt-4 pb-8"
       style={{
-        background: "var(--surface-2)",
+        background: "var(--surface-1)",
         overflow: isActual ? "auto" : "hidden",
         display: isActual ? "block" : "grid",
         placeItems: isActual ? undefined : "center",
@@ -381,12 +381,27 @@ function DeviceFrame({
   screen: ScreenShape | null;
   isDark: boolean;
 }) {
+  const [tokens, setTokens] = useState<DesignTokens>(() =>
+    designTokensStore.get(),
+  );
+  useEffect(() => designTokensStore.subscribe(setTokens), []);
+
   const isMobile = device.category === "mobile";
   const isTablet = device.category === "tablet";
   const hasBezel = isMobile || isTablet;
   const innerRadius = isMobile ? 60 : isTablet ? 32 : 12;
   const bezel = isMobile ? 10 : isTablet ? 12 : 0;
   const radius = innerRadius + bezel;
+
+  const bgPrimary = tokens.color.find((c) => c.name === "bg.primary");
+  const screenFill =
+    bgPrimary != null
+      ? isDark
+        ? bgPrimary.dark
+        : bgPrimary.light
+      : isDark
+        ? "#0f0f10"
+        : "#ffffff";
 
   return (
     <div
@@ -397,8 +412,8 @@ function DeviceFrame({
         borderRadius: radius,
         padding: bezel,
         boxShadow: hasBezel
-          ? `0 20px 50px rgba(0,0,0,${isDark ? 0.55 : 0.25}), 0 0 0 1.5px ${isDark ? "#2a2a2a" : "#1a1a1a"}`
-          : `0 10px 24px rgba(0,0,0,${isDark ? 0.45 : 0.1}), 0 0 0 1px var(--border-subtle)`,
+          ? `0 6px 20px rgba(0,0,0,${isDark ? 0.28 : 0.1}), 0 14px 36px -6px rgba(0,0,0,${isDark ? 0.18 : 0.06}), 0 0 0 1.5px ${isDark ? "#2a2a2a" : "#1a1a1a"}`
+          : `0 4px 14px rgba(0,0,0,${isDark ? 0.2 : 0.07}), 0 0 0 1px var(--border-subtle)`,
       }}
     >
       <div
@@ -408,7 +423,7 @@ function DeviceFrame({
           height: "100%",
           borderRadius: innerRadius,
           overflow: "hidden",
-          background: isDark ? "#0f0f10" : "#ffffff",
+          background: screenFill,
         }}
       >
         <ScreenSandpack
@@ -503,9 +518,10 @@ function ScreenSandpack({
   const theme: Theme = isDark ? "dark" : "light";
   const code = screen?.props.code ?? DEFAULT_SCREEN_CODE;
 
-  // Key includes the screen id + device so the iframe fully remounts when the
-  // user swaps device or screen — prevents stale DOM from leaking across.
-  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}`;
+  // Key includes the screen id + device + token signature so the iframe
+  // remounts when the user swaps device/screen or edits project tokens.
+  // Without the token sig, Sandpack can keep a stale `tokens.css`.
+  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}:${designTokensSignature(tokens)}`;
 
   return (
     <SandpackProvider

@@ -21,6 +21,7 @@ import {
   buildServiceFiles,
   buildDataFiles,
   buildTokensCss,
+  designTokensSignature,
   SANDPACK_INDEX_JS_FOR_THEME,
 } from "@/lib/screen-runtime";
 import {
@@ -252,9 +253,9 @@ function ComponentPreview({ component }: { component: DesignComponent }) {
     [component.name],
   );
 
-  // Key includes the component name so renaming forces a full remount —
-  // otherwise Sandpack's module cache may keep the stale import alive.
-  const key = `${component.id}:${component.name}`;
+  // Key includes the component name and token signature so renames and
+  // project token edits remount — otherwise Sandpack keeps stale `tokens.css`.
+  const key = `${component.id}:${component.name}:${designTokensSignature(tokens)}`;
 
   // Resizable height. Persists across reloads via localStorage; range
   // is clamped at render time so corrupt values can't escape.
