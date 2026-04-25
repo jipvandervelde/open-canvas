@@ -57,9 +57,9 @@ export type ComponentTokenProps = {
 
 export type ComponentTokens = Record<string, ComponentTokenProps>;
 
-// v15 — TextField placeholder: fg-tertiary at 50% (color-mix). v14: body
-// + filled.
-const STORAGE_KEY = "oc:design-component-tokens:v15";
+// v22 — NavBar large-title variant (title-large, subtitle, badge tokens).
+// v21: NavBar bottom padding.
+const STORAGE_KEY = "oc:design-component-tokens:v22";
 
 /** Seeded defaults. Every key and variant the in-house React components
  *  look up. Edit these in the Design panel (future) or via
@@ -222,9 +222,13 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
   },
 
   // ── Tab bar ─────────────────────────────────────────────────────────
+  // No hairline border — surface contrast against the screen above is the
+  // affordance. Top padding gives the items breathing room from the screen
+  // content; bottom padding pushes the items above the home-indicator
+  // safe area on iOS.
   "tab-bar": {
     backgroundColor: "{colors.bg-primary}",
-    height: "83px",
+    padding: "var(--space-md) 0 var(--space-safe-bottom) 0",
   },
   // Tab bar labels: `caption2` (9px) + title-weight (600). Same on active +
   // inactive so only color flips. Child label inherits the button’s font.
@@ -237,6 +241,111 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
     textColor: "{colors.fg-secondary}",
     typography: "{typography.caption2}",
     extra: { fontWeight: "var(--font-title-weight)" },
+  },
+
+  // ── Nav bar (top / stack navigation) ───────────────────────────────
+  // Borderless — relies on surface contrast w/ scroll content underneath.
+  // Inner action row is locked to 44px height in code; the token owns
+  // the safe-area top padding, horizontal screen inset, and a small bottom
+  // gap so the title doesn’t sit flush against the screen content.
+  "nav-bar": {
+    backgroundColor: "{colors.bg-primary}",
+    padding:
+      "var(--space-safe-top) var(--space-screen-px) var(--space-sm) var(--space-screen-px)",
+  },
+  "nav-bar-title": {
+    textColor: "{colors.fg-primary}",
+    typography: "{typography.headline}",
+  },
+  // Large-title variant (`variant="large"`) — left-aligned, sits in its own
+  // row beneath the action row. Pair with `nav-bar-subtitle` for the
+  // optional secondary line.
+  "nav-bar-title-large": {
+    textColor: "{colors.fg-primary}",
+    typography: "{typography.largeTitle}",
+  },
+  "nav-bar-subtitle": {
+    textColor: "{colors.fg-secondary}",
+    typography: "{typography.footnote}",
+  },
+  // Badge worn by trailing icon actions ("3 unread"). Solid disc + white
+  // ink; text scales relative to the parent icon button.
+  "nav-bar-badge": {
+    backgroundColor: "{colors.state-error}",
+    textColor: "{colors.white}",
+    typography: "{typography.caption2}",
+    rounded: "{radius.pill}",
+    extra: {
+      minWidth: "16px",
+      height: "16px",
+      padding: "0 4px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: "var(--font-title-weight)",
+      lineHeight: "1",
+      whiteSpace: "nowrap",
+      boxShadow: "0 0 0 2px var(--color-bg-primary)",
+    },
+  },
+  // Icon button (leading / trailing / secondary trailing): square 44×44
+  // tap target, neutral ink. Press feedback is a scale transform on the
+  // button element (handled in code, mirrors Button), not a fill.
+  "nav-bar-icon-button": {
+    textColor: "{colors.fg-primary}",
+    rounded: "{radius.md}",
+    extra: {
+      minWidth: "44px",
+      minHeight: "44px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "transparent",
+      border: "none",
+      padding: "0",
+      cursor: "pointer",
+    },
+  },
+  // Text action (e.g. "Cancel" / "Done"): brand-colored ink, action
+  // typography, same 44px tap height. Render shorter horizontally
+  // so the label sits flush to the screen edge like iOS.
+  "nav-bar-text-action": {
+    textColor: "{colors.brand}",
+    typography: "{typography.action}",
+    rounded: "{radius.md}",
+    padding: "0 var(--space-sm)",
+    extra: {
+      minHeight: "44px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "transparent",
+      border: "none",
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+    },
+  },
+
+  // ── Icon swap (animated icon w/ display chip) ──────────────────────
+  // `plain`   — no chip, ink follows currentColor.
+  // `tinted`  — soft brand-tinted disc, brand ink.
+  // `filled`  — solid brand disc, white ink.
+  // Each entry only sets the *chip* surface + ink; the component sizes
+  // the chip relative to `size` (icon glyph) so a single token applies
+  // to any icon size.
+  "icon-swap-plain": {
+    textColor: "{colors.fg-primary}",
+  },
+  "icon-swap-tinted": {
+    backgroundColor:
+      "color-mix(in oklch, var(--color-brand) 14%, transparent)",
+    textColor: "{colors.brand}",
+    rounded: "{radius.pill}",
+  },
+  "icon-swap-filled": {
+    backgroundColor: "{colors.brand}",
+    textColor: "{colors.white}",
+    rounded: "{radius.pill}",
   },
 
   // ── Focus ring (shared) ─────────────────────────────────────────────

@@ -292,7 +292,7 @@ function ComponentPreview({ component }: { component: DesignComponent }) {
           theme={theme}
           files={{
             "/App.js": appCode,
-            "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme),
+            "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme, {}, { allowScroll: true }),
             "/tokens.css": buildTokensCss(tokens),
             "/motion.js": motionJs,
             "/routes.js": routesJs,
@@ -465,6 +465,12 @@ function buildPreviewAppCode(name: string): string {
   if (name === "TextField") {
     return TEXT_FIELD_PREVIEW_APP;
   }
+  if (name === "NavBar") {
+    return NAV_BAR_PREVIEW_APP;
+  }
+  if (name === "IconSwap") {
+    return ICON_SWAP_PREVIEW_APP;
+  }
   return `import React from 'react';
 import Target from './components/${name}';
 import './tokens.css';
@@ -632,6 +638,223 @@ export default function App() {
           defaultValue="Text"
           fullWidth
         />
+      </div>
+    </div>
+  );
+}
+`;
+
+const NAV_BAR_PREVIEW_APP = `import React from 'react';
+import NavBar from './components/NavBar';
+import './tokens.css';
+
+const Caption = ({ children }) => (
+  <span style={{
+    display: 'block',
+    padding: '6px 4px 14px',
+    color: 'var(--color-fg-secondary)',
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+  }}>{children}</span>
+);
+
+const Frame = ({ children }) => (
+  <div style={{
+    border: '1px solid color-mix(in oklch, var(--color-fg-primary) 8%, transparent)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    background: 'var(--color-bg-primary)',
+  }}>{children}</div>
+);
+
+export default function App() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      padding: 20,
+      paddingTop: 16,
+      background: 'var(--color-bg-primary)',
+      color: 'var(--color-fg-primary)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+      boxSizing: 'border-box',
+    }}>
+      <div style={{ width: '100%', maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+        <Caption>Title only</Caption>
+        <Frame>
+          <NavBar title="Inbox" ariaLabel="Preview title" />
+        </Frame>
+
+        <Caption>Leading icon + title</Caption>
+        <Frame>
+          <NavBar
+            title="Message"
+            leading={{ kind: 'icon', icon: 'IconArrowLeft', ariaLabel: 'Back', onClick: () => {} }}
+            ariaLabel="Preview leading"
+          />
+        </Frame>
+
+        <Caption>Leading text + trailing text</Caption>
+        <Frame>
+          <NavBar
+            title="New Item"
+            leading={{ kind: 'text', label: 'Cancel', onClick: () => {} }}
+            trailing={{ kind: 'text', label: 'Save', onClick: () => {} }}
+            ariaLabel="Preview text actions"
+          />
+        </Frame>
+
+        <Caption>Leading icon + trailing icon + secondary trailing icon</Caption>
+        <Frame>
+          <NavBar
+            title="Project"
+            leading={{ kind: 'icon', icon: 'IconArrowLeft', ariaLabel: 'Back', onClick: () => {} }}
+            secondaryTrailing={{ icon: 'IconMagnifyingGlass', ariaLabel: 'Search', onClick: () => {} }}
+            trailing={{ kind: 'icon', icon: 'IconBarsThree', ariaLabel: 'More', onClick: () => {} }}
+            ariaLabel="Preview triple"
+          />
+        </Frame>
+
+        <Caption>No title — actions only</Caption>
+        <Frame>
+          <NavBar
+            leading={{ kind: 'icon', icon: 'IconArrowLeft', ariaLabel: 'Back', onClick: () => {} }}
+            trailing={{ kind: 'text', label: 'Done', onClick: () => {} }}
+            ariaLabel="Preview no-title"
+          />
+        </Frame>
+
+        <Caption>variant="large" — title only</Caption>
+        <Frame>
+          <NavBar
+            variant="large"
+            title="Inbox"
+            ariaLabel="Preview large"
+          />
+        </Frame>
+
+        <Caption>variant="large" — subtitle + trailing badge</Caption>
+        <Frame>
+          <NavBar
+            variant="large"
+            title="Notifications"
+            subtitle="3 new since last visit"
+            trailing={{
+              kind: 'icon',
+              icon: 'IconBell',
+              ariaLabel: 'Notifications',
+              onClick: () => {},
+              badge: 3,
+            }}
+            secondaryTrailing={{
+              icon: 'IconMagnifyingGlass',
+              ariaLabel: 'Search',
+              onClick: () => {},
+              badge: true,
+            }}
+            ariaLabel="Preview large badge"
+          />
+        </Frame>
+      </div>
+    </div>
+  );
+}
+`;
+
+const ICON_SWAP_PREVIEW_APP = `import React, { useState } from 'react';
+import IconSwap from './components/IconSwap';
+import './tokens.css';
+
+const Caption = ({ children }) => (
+  <span style={{
+    display: 'block',
+    padding: '6px 4px 14px',
+    color: 'var(--color-fg-secondary)',
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+  }}>{children}</span>
+);
+
+const Row = ({ children }) => (
+  <div style={{
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 24,
+    padding: '12px 16px',
+    border: '1px solid color-mix(in oklch, var(--color-fg-primary) 8%, transparent)',
+    borderRadius: 12,
+    background: 'var(--color-bg-primary)',
+  }}>{children}</div>
+);
+
+export default function App() {
+  const [playing, setPlaying] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      padding: 20,
+      background: 'var(--color-bg-primary)',
+      color: 'var(--color-fg-primary)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+      boxSizing: 'border-box',
+    }}>
+      <div style={{ width: '100%', maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+        <Caption>Display variants — plain, tinted, filled</Caption>
+        <Row>
+          <IconSwap name="IconHeart" display="plain" size={24} ariaLabel="Heart" />
+          <IconSwap name="IconHeart" display="tinted" size={24} ariaLabel="Heart tinted" />
+          <IconSwap name="IconHeart" display="filled" size={24} ariaLabel="Heart filled" />
+        </Row>
+
+        <Caption>Press-scale (interactive)</Caption>
+        <Row>
+          <IconSwap name="IconBolt" display="tinted" size={28} onClick={() => {}} ariaLabel="Bolt" />
+          <IconSwap name="IconBookmark" display="filled" size={28} onClick={() => {}} ariaLabel="Bookmark" />
+          <IconSwap name="IconShareOs" display="plain" size={28} onClick={() => {}} ariaLabel="Share" />
+        </Row>
+
+        <Caption>Tap to swap — blur + scale crossfade</Caption>
+        <Row>
+          <IconSwap
+            name={playing ? 'IconPause' : 'IconPlay'}
+            variant="filled"
+            display="filled"
+            size={28}
+            onClick={() => setPlaying((v) => !v)}
+            ariaLabel={playing ? 'Pause' : 'Play'}
+          />
+          <IconSwap
+            name="IconHeart"
+            variant={liked ? 'filled' : 'outlined'}
+            display="tinted"
+            size={26}
+            onClick={() => setLiked((v) => !v)}
+            ariaLabel={liked ? 'Unlike' : 'Like'}
+          />
+          <IconSwap
+            name={muted ? 'IconMute' : 'IconVolumeFull'}
+            display="plain"
+            size={26}
+            onClick={() => setMuted((v) => !v)}
+            ariaLabel={muted ? 'Unmute' : 'Mute'}
+          />
+        </Row>
       </div>
     </div>
   );

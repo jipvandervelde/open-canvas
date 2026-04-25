@@ -119,13 +119,73 @@ export type IconSearchHit = {
   score: number;
 };
 
-/**
- * Keyword search. Multi-word queries match ALL words (AND semantics).
- * Scoring: exact-name hit > name-substring > alias-word > alias-substring.
- * Returns up to `limit` hits sorted by score desc then name asc.
- */
-export function searchIcons(query: string, limit = 24): IconSearchHit[] {
-  const q = query.toLowerCase().trim();
+const SYNONYMS: Record<string, string[]> = {
+  account: ["user", "profile", "person"],
+  add: ["plus", "create", "new"],
+  alert: ["warning", "bell", "notification"],
+  analytics: ["chart", "graph", "statistics"],
+  bag: ["shopping", "cart", "basket"],
+  basket: ["shopping", "cart", "bag"],
+  calendar: ["date", "schedule", "event"],
+  cart: ["shopping", "basket", "bag"],
+  cash: ["money", "dollar", "payment"],
+  check: ["done", "confirm", "tick"],
+  close: ["x", "cancel", "remove"],
+  cog: ["settings", "gear"],
+  complete: ["check", "done", "success"],
+  delete: ["trash", "remove"],
+  delivery: ["truck", "shipping"],
+  discover: ["compass", "search"],
+  done: ["check", "complete", "success"],
+  edit: ["pencil", "compose"],
+  error: ["warning", "alert"],
+  favorite: ["heart", "star"],
+  filter: ["sliders", "tune"],
+  food: ["restaurant", "fork", "knife"],
+  gear: ["settings", "cog"],
+  location: ["pin", "map"],
+  menu: ["bars", "hamburger"],
+  more: ["ellipsis", "dots"],
+  notification: ["bell", "alert"],
+  payment: ["card", "credit", "money"],
+  pickup: ["bag", "shopping"],
+  profile: ["user", "person", "account"],
+  remove: ["trash", "delete", "minus"],
+  search: ["magnifying", "glass"],
+  settings: ["gear", "cog", "sliders"],
+  share: ["send", "upload"],
+  shipping: ["delivery", "truck"],
+  stats: ["chart", "graph", "statistics"],
+  success: ["check", "done", "complete"],
+  user: ["profile", "person", "account"],
+};
+
+function normalizeQuery(query: string): string {
+  return query
+    .replace(/^icon/i, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .trim();
+}
+
+function queryVariants(query: string): string[] {
+  const base = normalizeQuery(query);
+  if (!base) return [];
+  const words = base.split(/\s+/).filter(Boolean);
+  const variants = new Set<string>([base]);
+  for (const word of words) {
+    variants.add(word);
+    for (const synonym of SYNONYMS[word] ?? []) {
+      variants.add(synonym);
+      variants.add(words.map((w) => (w === word ? synonym : w)).join(" "));
+    }
+  }
+  return Array.from(variants);
+}
+
+function searchIconsStrict(query: string, limit: number): IconSearchHit[] {
+  const q = normalizeQuery(query);
   if (!q) return [];
   const words = q.split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
@@ -169,6 +229,48 @@ export function searchIcons(query: string, limit = 24): IconSearchHit[] {
 
   hits.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
   return hits.slice(0, limit);
+}
+
+/**
+ * Keyword search. Multi-word queries match ALL words (AND semantics).
+ * Scoring: exact-name hit > name-substring > alias-word > alias-substring.
+ * Returns up to `limit` hits sorted by score desc then name asc.
+ */
+export function searchIcons(query: string, limit = 24): IconSearchHit[] {
+  const byName = new Map<string, IconSearchHit>();
+  for (const variant of queryVariants(query)) {
+    const hits = searchIconsStrict(variant, limit);
+    for (const hit of hits) {
+      const current = byName.get(hit.name);
+      if (!current || hit.score > current.score) {
+        byName.set(hit.name, hit);
+      }
+    }
+  }
+  const hits = Array.from(byName.values());
+  hits.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return hits.slice(0, limit);
+}
+
+export function closestIconNames(name: string, limit = 8): IconSearchHit[] {
+  const index = getIconsIndex();
+  const cleaned = normalizeQuery(name);
+  const compact = cleaned.replace(/\s+/g, "");
+  const byName = new Map<string, IconSearchHit>();
+  for (const q of [cleaned, compact, ...queryVariants(cleaned)].filter(Boolean)) {
+    for (const hit of searchIcons(q, limit)) {
+      if (!byName.has(hit.name)) byName.set(hit.name, hit);
+    }
+  }
+  if (byName.size === 0) {
+    for (const icon of index.icons) {
+      if (icon.name.toLowerCase().startsWith("icon" + compact.slice(0, 4))) {
+        byName.set(icon.name, { ...icon, score: 1 });
+      }
+      if (byName.size >= limit) break;
+    }
+  }
+  return Array.from(byName.values()).slice(0, limit);
 }
 
 /** Validate that an icon name actually exists in the set. Cheap O(1) lookup. */

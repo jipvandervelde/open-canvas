@@ -1260,6 +1260,36 @@ h3 {
   flex-direction: column !important;
 }
 
+/* Collapsed Preview panel: 44×44 circular FAB. The button covers the full
+   aside via `inset: 0` so the whole disc is one tap target and the icon
+   centers reliably regardless of the aside's flex layout. */
+.oc-preview-collapsed-fab {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+@media (hover: hover) {
+  .oc-preview-collapsed-fab:hover {
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+}
+/* Make the collapsed aside itself act like a positioning context for the
+   FAB and shed the column-flex stretching that would otherwise clip the
+   button. The aside still owns the chrome (border + shadow + radius). */
+.oc-preview[data-collapsed] {
+  display: block;
+  padding: 0;
+}
+
 /* Small rail / icon buttons inside the Preview panel. */
 .oc-preview-rail-btn {
   width: 28px;
@@ -3708,7 +3738,8 @@ h3 {
 }
 /* Color rows get a 2nd value column so light + dark are editable in place. */
 .oc-tokens-row--color {
-  grid-template-columns: 40px 1fr 78px 78px 20px;
+  grid-template-columns: 48px 1fr 78px 78px 20px;
+  align-items: center;
 }
 /* Typography rows have 5 value fields: family / size / weight / lh / tracking.
    Family gets the widest share; size/weight/lh/tracking are narrow.
@@ -3738,25 +3769,24 @@ h3 {
 .oc-tokens-typography-tracking {
   text-align: center;
 }
+/* Dual color swatch: two independent rounded chips (light + dark) with a
+   2px gap so each mode reads as its own surface. Container has no chrome
+   of its own — the chips own their borders. */
 .oc-tokens-dual-swatch {
-  position: relative;
-  width: 40px;
-  height: 22px;
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
   display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 46px;
+  height: 22px;
 }
 .oc-tokens-swatch--half {
-  width: 20px;
+  width: 22px;
   height: 22px;
-  box-shadow: none;
-  border-radius: 0;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
   position: relative;
   overflow: hidden;
-}
-.oc-tokens-swatch--half + .oc-tokens-swatch--half {
-  box-shadow: inset 1px 0 0 0 var(--border-subtle);
+  cursor: pointer;
 }
 .oc-tokens-value--light,
 .oc-tokens-value--dark {
@@ -3793,9 +3823,14 @@ h3 {
 .oc-tokens-swatch input[type="color"] {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
   opacity: 0;
   cursor: pointer;
   border: none;
+  background: transparent;
 }
 .oc-tokens-name,
 .oc-tokens-value {

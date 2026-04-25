@@ -22,7 +22,10 @@ const STORAGE_KEY_ZOOM = "oc:preview-panel-zoom";
 
 export type PreviewZoomMode = "fit" | "actual";
 
-export const COLLAPSED_WIDTH = 40;
+/** Collapsed: 44×44 circular FAB with a 10px gap to the viewport's right
+ *  edge — total horizontal real estate reserved by the panel = 44 + 10. */
+export const COLLAPSED_WIDTH = 54;
+export const COLLAPSED_DIAMETER = 44;
 export const MAX_WIDTH = 1400;
 export const MAX_HEIGHT = 1600;
 /** Minimum scale the device is allowed to render at — a floor so the preview

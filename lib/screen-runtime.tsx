@@ -115,9 +115,14 @@ if (
 export function SANDPACK_INDEX_JS_FOR_THEME(
   theme: "light" | "dark",
   routeParams: Record<string, string> = {},
+  options: { allowScroll?: boolean } = {},
 ): string {
   const colorScheme = theme === "dark" ? "dark" : "light";
   const initialRouteParams = JSON.stringify(routeParams);
+  // Screen previews lock the iframe (it acts like a phone). The Components
+  // panel sets `allowScroll` so taller previews (e.g. NavBar examples) can
+  // be scrolled inside the preview block.
+  const overflowRule = options.allowScroll ? "auto" : "hidden";
   return `import App from "./App";
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -137,7 +142,7 @@ resetStyle.textContent = \`
     padding: 0 !important;
     height: 100% !important;
     width: 100% !important;
-    overflow: hidden;
+    overflow: ${overflowRule};
     background: var(--color-bg-primary) !important;
   }
   body {

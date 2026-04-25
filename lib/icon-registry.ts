@@ -272,8 +272,22 @@ export function Icon({
 }) {
   const entry = ICONS[name];
   if (!entry) {
+    const message = '[centralIcons] Unknown icon name: ' + name;
     if (typeof console !== 'undefined') {
-      console.warn('[centralIcons] Unknown icon name:', name);
+      console.warn(message);
+    }
+    try {
+      if (typeof window !== 'undefined' && window.parent) {
+        window.parent.postMessage({
+          __oc: 'oc:error',
+          source: 'centralIcons',
+          screenId: window.__ocScreenId || null,
+          message,
+          stack: '',
+        }, '*');
+      }
+    } catch (err) {
+      // best-effort diagnostics only
     }
     return null;
   }

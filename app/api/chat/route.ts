@@ -11,7 +11,12 @@ import { kimi } from "@/lib/kimi";
 import { runKimiWebSearch } from "@/lib/kimi-web-search";
 import { buildSkillIndexBlock, loadSkill } from "@/lib/skills-registry";
 import { buildAgentFraming } from "@/lib/agent-framing";
-import { searchIcons as runIconSearch } from "@/lib/icon-metadata";
+import {
+  closestIconNames,
+  getIconsIndex,
+  iconExists,
+  searchIcons as runIconSearch,
+} from "@/lib/icon-metadata";
 
 export const maxDuration = 60;
 
@@ -90,7 +95,7 @@ Tools you can call:
 
 1. **delegateScreen({ name, viewportId, brief, sharedContext })** — PRIMARY tool for building screens. A sub-agent writes the code and streams it live onto the canvas. You do NOT call createScreen afterwards — delegateScreen IS the screen creation. **Fire all independent delegateScreen calls in ONE assistant message. This is non-negotiable.** The client fans out concurrent fetches; serializing them wastes seconds per screen for no benefit.
 
-   **CRITICAL:** the screen sub-agent runs WITHOUT thinking to keep first-token latency low (so the user sees code stream in immediately). That means your brief is ITS entire plan — there's no reasoning step on the sub-agent's side. You are the one thinking here; the sub-agent just renders.
+   **CRITICAL:** the screen sub-agent has thinking and a small tool set, but your brief is still its main plan and the final stream must be raw /App.js source. Do not rely on it to invent missing architecture. Pass concrete shared data/services/routes/components, and for icon-heavy screens either call searchIcons yourself or name the exact icon concepts it should resolve.
 
    **brief** must be fully structured, not a sentence. Use this exact format (include EVERY section unless a section genuinely doesn't apply):
 
@@ -130,12 +135,12 @@ Tools you can call:
 
 3. **createScreen({ name, viewportId, code })** — Secondary. Use when you genuinely want to WRITE the code yourself (trivial stubs, specific quick scaffolds where delegation is overkill).
 
-4. **editScreen({ id, edits: [{oldString, newString}] })** — PREFERRED for incremental changes. Applies surgical old-string → new-string patches — same mechanic as Claude Code's Edit tool. Use for: one-line tweaks, renaming a variable, adjusting a single style, fixing a typo, swapping an import, adding one prop. Much faster and cheaper than re-emitting the whole screen. Include enough surrounding context in \`oldString\` to make the match unique, or set \`replaceAll: true\`. Multiple edits batched in one call apply sequentially; if any fails the whole batch rolls back.
+4. **editScreen({ id, edits: [{oldString, newString}] })** — PREFERRED for tiny incremental changes only. Applies surgical old-string → new-string patches to the screen's CURRENT code. Use for: one-line tweaks, renaming a variable, adjusting a single style, fixing a typo, swapping an import, adding one prop. Include enough exact surrounding context in \`oldString\` to make the match unique, or set \`replaceAll: true\` only for a deliberate global mechanical change. Before calling editScreen, use \`searchCodebase\` when you don't have the exact current substring. Multiple edits are applied sequentially; if any edit fails, the whole batch rolls back and returns \`sourceSnapshot\`. After any editScreen failure, DO NOT retry the same oldString — copy an exact substring from \`sourceSnapshot\` or use updateScreen with full corrected code.
 
 5. **updateScreen({ id?, code?, name?, viewportId? })** — FULL rewrite. Use only for: (a) a whole-screen rewrite when most of the code changes, (b) rename, (c) viewport change. For small changes, use editScreen instead — that's the default. If a screen is selected and the user says "change the layout" or "fix the spacing," reach for editScreen first if the change is surgical.
    - Pass the id explicitly when you know it from the canvas state.
 
-6. **reviewScreen({ id })** — Spawn a reviewer sub-agent that reads ONE screen's source and returns structured issues. Call in parallel per-screen during the review phase; then fire editScreen/updateScreen calls (also parallel, one per screen) to apply the fixes. Much more rigorous than eyeballing. After reviewScreen returns issues, apply fixes via editScreen when the change is surgical (most cases) or updateScreen when the review calls for substantial rewrite.
+6. **reviewScreen({ id })** — Spawn a reviewer sub-agent that reads ONE screen's source and returns structured issues. Call in parallel per-screen during the review phase; then apply fixes with ONE follow-up operation per screen. Use editScreen only when you have exact current substrings for every patch; otherwise use updateScreen with the full corrected code. Do not fire multiple editScreen calls against the same screen in parallel.
 
 7. **searchCodebase({ query, scope? })** — Grep the in-canvas project (screens, components, services, data, routes, tokens). Use BEFORE editing when you're unsure what's currently on a screen, which screens import a service, or what a route path is. Returns ranked excerpts. Cheap and instant — lean on it rather than guessing. Especially useful BEFORE editScreen — search for the exact line you want to patch, then include enough context in oldString for a unique match.
 
@@ -220,7 +225,7 @@ For a multi-screen request, the canonical flow is:
 3. **When they all return, a single assistant message** with (a) \`reviewScreen\` for every screen that was built, and (b) any independent \`delegateScreen\` calls for screens that depend on the first batch (if any). Reviews + next-wave delegates in the same message. Don't wait for the reviews to come back before starting the next wave of independent work — they truly are independent.
 4. **Review phase — parallel top to bottom:**
    - Single assistant message: fire \`reviewScreen({id})\` for every screen that was just built. All in parallel. Each returns JSON \`{summary, issues: [{severity, category, location, problem, fix}]}\`.
-   - Single assistant message: fire \`updateScreen({id, code})\` calls — one per screen that has issues — in parallel. Each updateScreen applies ALL of that screen's fixes at once (don't do one updateScreen per issue — one per screen, batched fixes). Zero-issue screens get no updateScreen.
+   - Single assistant message: fire ONE fix operation per screen that has issues. Use \`editScreen\` only for exact tiny patches copied from current source; use \`updateScreen({id, code})\` when fixes touch multiple regions, overlap, or require rewriting surrounding structure. Do not issue several editScreen calls against the same screen in parallel.
    - Don't re-review after the fixes unless the user asks. One review cycle is the default; trust the fixes.
 
    The review catches: compile failures (ok:false), cross-screen inconsistencies (tab bar / card / typography drift), broken nav wiring (list→detail missing querystring params, detail screens missing useParams), and data-flow bugs (clicking row A shows row B).
@@ -465,7 +470,7 @@ export async function POST(req: Request) {
       }),
       editScreen: tool({
         description:
-          "PREFERRED tool for incremental changes to an existing screen. Applies surgical old_string → new_string patches to the screen's code — same mechanic as Claude Code / Cursor. Much faster, cheaper, and less error-prone than rewriting the whole screen via updateScreen. Fire this for: bug fixes on one line, renaming one variable, tweaking one style value, adding one import, adjusting one component's props. The patch requires an exact substring match — include enough surrounding context in `oldString` to make it unique. Multiple edits can be batched in one call; they apply sequentially. If any edit fails (oldString not found or ambiguous), ALL edits in that call are reverted.",
+          "PREFERRED only for tiny incremental changes when you have exact current source. Applies surgical old_string → new_string patches to the screen's code. Fire this for: one-line bug fixes, renaming one variable, tweaking one style value, adding one import, adjusting one component's props. The patch requires an exact substring match from the CURRENT source — call searchCodebase first if you are unsure. Batch all edits for one screen in a single editScreen call; never fire multiple editScreen calls against the same screen in parallel. If any edit fails, ALL edits roll back and the tool returns sourceSnapshot; retry by copying an exact substring from that snapshot, or use updateScreen for overlapping/multi-section fixes.",
         inputSchema: z.object({
           id: z
             .string()
@@ -478,7 +483,7 @@ export async function POST(req: Request) {
                 oldString: z
                   .string()
                   .describe(
-                    "Exact substring to find (include surrounding context to make it unique).",
+                    "Exact substring copied from the current screen source (include surrounding context to make it unique).",
                   ),
                 newString: z
                   .string()
@@ -661,7 +666,7 @@ export async function POST(req: Request) {
             .min(3)
             .max(30)
             .describe(
-              "How many realistic seed rows the background sub-agent should generate (typical: 6–12).",
+              "How many realistic seed rows the background sub-agent should generate (typical: 12–20; list-heavy screens 18–25).",
             ),
         }),
       }),
@@ -799,7 +804,7 @@ export async function POST(req: Request) {
       }),
       reviewScreen: tool({
         description:
-          "Ask a dedicated reviewer sub-agent to critique ONE screen and return a JSON list of specific, surgical issues. Use this during the review phase after a parallel batch of delegateScreens lands — fire multiple reviewScreen calls in parallel, one per screen, then turn each returned issue into an updateScreen call (also in parallel if they target different screens). This is cheaper and more rigorous than re-reading every screen's full source in your own context.",
+          "Ask the review pipeline to critique ONE screen and return a JSON list of specific, surgical issues. The server does a quick thinking-OFF scout, fans out focused sub-reviewers in parallel, and merges their findings. Use this during the review phase after a parallel batch of delegateScreens lands — fire multiple reviewScreen calls in parallel, one per screen, then turn each returned issue into an updateScreen call (also in parallel if they target different screens).",
         inputSchema: z.object({
           id: z
             .string()
@@ -859,12 +864,18 @@ export async function POST(req: Request) {
       }),
       searchIcons: tool({
         description:
-          "Search the Central Icons library (1970 icons) by keyword. Call this BEFORE writing `<Icon name=\"...\">` — guessing names (`IconSettings` vs `IconSetting` vs `IconCog`) will render null + print a console warning. Pass natural-language keywords (\"home\", \"chart statistics\", \"lock security\"). Returns up to 24 matches ranked by relevance: { name: 'IconHome', aliases: 'home, house', category: 'Interface General' }. Use the `name` verbatim inside `<Icon name=\"IconHome\" />` — import from './centralIcons' (NEVER from @central-icons-react/...). Fire in parallel if you need icons for multiple concepts in one screen.",
+          "Search or validate the Central Icons library (1970 icons). REQUIRED before writing any `<Icon name=\"...\">`, `IconSwap name`, TabBar `icon`, NavBar icon prop, or component prop that expects a central icon name. Guessing names renders null. Pass natural-language keywords (\"home\", \"payment card\", \"settings gear\") or pass an exact candidate name to validate. The tool returns only real names; use one of the returned `name` values verbatim and include those exact names in delegateScreen sharedContext.",
         inputSchema: z.object({
           query: z
             .string()
             .describe(
-              "Keywords describing the icon's meaning. Can be multiple words — all must match (AND semantics). e.g. 'home', 'chart bar', 'lock security', 'arrow right'. Don't include 'Icon' prefix.",
+              "Keywords describing the icon's meaning, or an exact candidate name to validate. e.g. 'home', 'payment card', 'settings gear', 'IconHome'.",
+            ),
+          exactName: z
+            .string()
+            .optional()
+            .describe(
+              "Optional exact icon name to validate, e.g. 'IconSettings'. If invalid, alternatives are returned.",
             ),
           limit: z
             .number()
@@ -876,24 +887,65 @@ export async function POST(req: Request) {
               "Max hits to return. Default 12 — enough to pick from without flooding context.",
             ),
         }),
-        execute: async ({ query, limit }) => {
+        execute: async ({ query, exactName, limit }) => {
+          const candidate = exactName ?? (/^Icon[A-Z0-9]/.test(query) ? query : "");
+          if (candidate) {
+            if (iconExists(candidate)) {
+              const index = getIconsIndex();
+              return {
+                ok: true,
+                query,
+                exactName: candidate,
+                valid: true,
+                approvedNames: [candidate],
+                hits: [
+                  {
+                    name: candidate,
+                    aliases: index.aliasesByName[candidate] ?? "",
+                    category: index.categoryByName[candidate] ?? "",
+                  },
+                ],
+                instruction:
+                  `Use exactly "${candidate}" for this icon. Do not substitute another Icon* name.`,
+              };
+            }
+            const alternatives = closestIconNames(candidate, limit ?? 12);
+            return {
+              ok: false,
+              query,
+              exactName: candidate,
+              valid: false,
+              approvedNames: alternatives.map((h) => h.name),
+              hits: alternatives.map((h) => ({
+                name: h.name,
+                aliases: h.aliases,
+                category: h.category,
+              })),
+              hint:
+                `Icon "${candidate}" does not exist. Pick one returned name verbatim, or search with simpler semantic keywords.`,
+            };
+          }
           const hits = runIconSearch(query, limit ?? 12);
           if (hits.length === 0) {
             return {
               ok: false,
               query,
               hits: [],
-              hint: "No icons match. Try shorter/simpler keywords ('chart' instead of 'bar graph analytics') or a different category.",
+              approvedNames: [],
+              hint: "No icons match. Try shorter/simpler keywords ('chart' instead of 'bar graph analytics') or validate a candidate exactName.",
             };
           }
           return {
             ok: true,
             query,
+            approvedNames: hits.map((h) => h.name),
             hits: hits.map((h) => ({
               name: h.name,
               aliases: h.aliases,
               category: h.category,
             })),
+            instruction:
+              "Use one of approvedNames verbatim. Do not invent an Icon* name that is not in this response.",
           };
         },
       }),

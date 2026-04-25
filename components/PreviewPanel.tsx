@@ -12,6 +12,7 @@ import { useEditorRef } from "@/lib/editor-context";
 import {
   previewPanelStore,
   COLLAPSED_WIDTH,
+  COLLAPSED_DIAMETER,
   PREVIEW_STAGE_INSET_H,
   PREVIEW_STAGE_INSET_V,
   type PreviewZoomMode,
@@ -120,15 +121,20 @@ export function PreviewPanel() {
     <aside
       data-agentation-ignore
       className="oc-preview fixed flex flex-col overflow-hidden"
+      data-collapsed={state.collapsed || undefined}
       style={{
         top: 10,
         right: 10,
-        width: Math.max(0, width - 10),
-        // Flexible height, capped to the viewport so the panel stays inset
-        // on both top and bottom no matter how tall the stored value is.
+        // Collapsed: a 44×44 circular FAB pinned to the top-right corner.
+        // Expanded: a panel that respects the dragged width minus the right
+        // inset (matches `--right-panel-w` budget the canvas reserves).
+        width: state.collapsed
+          ? COLLAPSED_DIAMETER
+          : Math.max(0, width - 10),
         height: state.collapsed
-          ? "calc(100vh - 20px)"
+          ? COLLAPSED_DIAMETER
           : `min(${state.height}px, calc(100vh - 20px))`,
+        borderRadius: state.collapsed ? "50%" : undefined,
         zIndex: 50,
         background: "var(--surface-1)",
       }}
@@ -156,17 +162,15 @@ export function PreviewPanel() {
 
 function CollapsedRail() {
   return (
-    <div className="flex flex-col items-center gap-2 pt-3">
-      <button
-        type="button"
-        onClick={() => previewPanelStore.setCollapsed(false)}
-        title="Show preview"
-        aria-label="Show preview"
-        className="oc-preview-rail-btn"
-      >
-        <PhoneIcon />
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => previewPanelStore.setCollapsed(false)}
+      title="Show preview"
+      aria-label="Show preview"
+      className="oc-preview-collapsed-fab"
+    >
+      <PhoneIcon />
+    </button>
   );
 }
 
@@ -585,23 +589,16 @@ function ScreenSandpack({
 /*  Icons                                                              */
 /* ------------------------------------------------------------------ */
 
+/** Real Central Icon — hand-rolled SVG was 24×24 squashed into 20×20,
+ *  which read squished on the 44×44 collapsed FAB. The registered
+ *  `IconPhone` glyph already paints to its viewBox and respects the
+ *  `size` prop. */
+const PhoneIconGlyph = getIconComponent("IconPhone", "outlined");
+
 function PhoneIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="7" y="2" width="10" height="20" rx="2.5" />
-      <line x1="11" y1="18" x2="13" y2="18" />
-    </svg>
-  );
+  if (!PhoneIconGlyph) return null;
+  const I = PhoneIconGlyph;
+  return <I size={22} ariaHidden />;
 }
 
 /** `IconSidebarLeftArrow` points left; flip for “dismiss to the right” (hide). */

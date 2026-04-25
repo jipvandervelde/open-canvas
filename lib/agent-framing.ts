@@ -144,7 +144,7 @@ function renderIconStyleBlock(style: IconStyleSnapshot): string {
     `- Default size: **${style.defaultSize}px** — scale by role: 16 inline, 20 list accessory, 24 primary UI, 28 tab bar, 40+ hero.`,
     `- Default color: \`${style.defaultColor}\` — pass via the \`color\` prop. Switch to \`var(--color-brand)\` on active tab/nav icons, \`var(--color-state-error)\` on destructive.`,
     "- **Import path:** the icons module sits at the project root (`/centralIcons.js`). Use the right relative path: `./centralIcons` from a screen (`/App.js`), `../centralIcons` from a shared component (`/components/Foo.js`). DO NOT import from `@central-icons-react/…` (it will fail DependencyNotFoundError at runtime).",
-    "- **Call `searchIcons({ query })` to find exact names before writing `<Icon name=\"…\">`.** Guessing will render null + print a console warning. See the Icons section of the stack guidelines for the full component API.",
+    "- **Call `searchIcons({ query })` to find exact names before writing `<Icon name=\"…\">`, `IconSwap name`, or any icon prop.** Guessing will render null and surface a runtime error. When delegating, pass an \"Approved icons\" list when you already know the names; screen sub-agents can also call `searchIcons` before final code.",
   ].join("\n");
 }
 

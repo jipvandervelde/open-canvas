@@ -1,28 +1,37 @@
-import { streamText } from "ai";
+import { stepCountIs, streamText, tool } from "ai";
+import { z } from "zod";
 import {
   CORE_RULES,
   pickPrinciplesForBrief,
 } from "@/lib/design-principles";
 import { kimi } from "@/lib/kimi";
 import { buildAgentFraming } from "@/lib/agent-framing";
+import {
+  closestIconNames,
+  getIconsIndex,
+  iconExists,
+  searchIcons as runIconSearch,
+} from "@/lib/icon-metadata";
 
 export const maxDuration = 60;
 
 const SUB_AGENT_SYSTEM = `You are a focused React code generator. You output ONE screen's source for /App.js and NOTHING else — no prose, no code fences, no explanation. Your entire response must be valid JavaScript starting with either \`import\` or \`export default function\`.
 
-IMPORTANT: you run without the thinking channel. The brief you receive IS your plan — the orchestrator (which does have thinking) has already decomposed the screen for you. Read every section of the brief carefully before writing. Do NOT invent structure the brief didn't specify. Do NOT substitute generic copy when the brief gave you exact strings — use those strings.
+IMPORTANT: you have thinking and tools available, but your final output still must be ONLY /App.js source code. Use thinking to resolve inconsistencies before writing. Use tools when you need exact external names (especially icons). Do NOT emit prose, markdown, JSON, or tool notes in the final response.
 
 Expected brief format:
 
 - **Structure**: top / body / bottom hierarchy. Render it literally.
 - **Content**: exact user-visible strings. Use them verbatim.
-- **Imports**: exact import paths the orchestrator has approved. Don't invent ones. Don't omit ones — if it's listed, use it.
+- **Imports**: exact import paths the orchestrator has approved. Don't invent ones. Don't omit ones — if it's listed, use it. For icons, exact approved icon names must be listed or obtained with searchIcons.
 - **Interactions**: every tap / input / navigation and its effect. Wire them up.
 - **Visual**: tokens, spacing, motion presets. Reference them by the exact var() names listed.
 
 If a section is missing from the brief, fall back to sensible defaults consistent with the principles files embedded in this prompt.
 
 You are part of a team. The brief's Shared Context may list "Sibling screens" — screens being built right now by other sub-agents in parallel. When present, use this to make your output FEEL CONSISTENT with the rest of the batch: same top bar / tab bar pattern if the siblings have one, same card / list-row style, same typography hierarchy, same color usage, same spacing rhythm. The user's strongest quality signal is that the screens look like they belong together.
+
+Cross-screen consistency is functional, not just visual. If the brief or Shared Context lists a service, data entity, route, calculation helper, or invariant, import and use it exactly. Do NOT invent a parallel hardcoded array, subtotal, tax, delivery fee, grand total, order id, selected address, selected payment method, or confirmation state. In checkout/cart/booking/order flows, all repeated values must come from the same imported service/helper or from one explicitly specified constant in the brief.
 
 Rules:
 - Plain React function component, default-exported: \`export default function App() { ... }\`.
@@ -32,13 +41,15 @@ Rules:
 - Flex layout always. Never absolute positioning. Never margin-based horizontal alignment.
 - When the shared context lists tokens, use them via \`var(--color-*)\`, \`var(--space-*)\`, \`var(--radius-*)\`, \`var(--font-*)\`.
 - Import shared components (\`import Name from './components/Name';\`), services (\`import { useSession } from './services/session';\`, \`import { Link, useParams } from './services/router';\`, \`import { useToast } from './services/toast';\`), motion presets (\`import { Motion, MotionList } from './motion';\`), and data entities (\`import { recipes, findRecipe } from './data/recipes';\`) from the paths listed in the shared context. Do NOT invent imports — only use what's listed.
+- Icons: import \`{ Icon }\` only from \`./centralIcons\`. Use ONLY exact icon names listed in the brief / Shared Context OR returned by your searchIcons tool. If you want an icon and no exact approved name is listed, call searchIcons before writing final code. Never guess names like \`IconSettings\`, \`IconCheckCircle\`, \`IconCreditCard\`, or \`IconShoppingCart\`.
 - For list screens, import the data entity and render rows from it. For detail screens, \`const { id } = useParams();\` then \`find{Singular}(id)\`. For list→detail links use querystring params: \`<Link to={\\\`/name-detail?id=\${item.id}\\\`}>\`.
+- For transactional screens, import the listed service hook/helpers and render computed totals from the service. Do NOT recompute totals differently per screen and do NOT hardcode button totals that can drift from the summary.
 - Default font: \`fontFamily: 'system-ui, -apple-system, sans-serif'\`.
 - Mobile screens: edge-to-edge layout like a native app (top bar → content → bottom actions). Not centered cards.
 - Use the full viewport intentionally: distribute content vertically, don't cluster in the middle with empty top/bottom.
 - Realistic placeholder content, not Lorem ipsum.
 - Semantic HTML where natural.
-- No external packages beyond react, react-dom, framer-motion, and the project's local ./components, ./services, ./data, ./motion, ./routes.
+- No external packages beyond react, react-dom, framer-motion, and the project's local ./components, ./services, ./data, ./motion, ./routes, ./centralIcons, ./component-tokens.
 
 Output ONLY the source code of /App.js. No markdown, no preamble, no closing commentary.`;
 
@@ -112,16 +123,15 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n");
 
-  // Sub-agents run Kimi K2.6 with thinking OFF — first-token latency matters
-  // here because the user watches code stream into the screen live. Thinking
-  // delays the first visible character by several seconds; better to stream
-  // immediately and let the orchestrator (which keeps thinking ON) handle
-  // any reflection before + after the batch. `modelId` is accepted but
-  // ignored — the whole pipeline is locked on k2.6.
+  // Sub-agents now run as real, small agents: thinking ON plus a limited
+  // tool set. We keep the transport contract unchanged by streaming only
+  // final text deltas from result.textStream, so the client still receives
+  // raw /App.js source. Tool-call envelopes never reach Sandpack.
+  // `modelId` is accepted but ignored — the whole pipeline is locked on k2.6.
   void modelId;
 
   const result = streamText({
-    model: kimi({ thinking: false }),
+    model: kimi({ thinking: true }),
     system:
       buildAgentFraming({
         projectDoc,
@@ -135,6 +145,91 @@ export async function POST(req: Request) {
       "\n\n---\n\n" +
       CORE_RULES,
     prompt,
+    stopWhen: stepCountIs(8),
+    tools: {
+      searchIcons: tool({
+        description:
+          "Search or validate the Central Icons library. REQUIRED before using any <Icon name=\"...\"> that was not explicitly approved in the brief/shared context. Use returned names verbatim.",
+        inputSchema: z.object({
+          query: z
+            .string()
+            .describe(
+              "Keywords describing the icon's meaning, or an exact candidate name to validate. e.g. 'home', 'payment card', 'settings gear', 'IconHome'.",
+            ),
+          exactName: z
+            .string()
+            .optional()
+            .describe(
+              "Optional exact icon name to validate, e.g. 'IconSettings'. If invalid, alternatives are returned.",
+            ),
+          limit: z.number().int().min(1).max(24).optional(),
+        }),
+        execute: async ({ query, exactName, limit }) => {
+          const candidate =
+            exactName ?? (/^Icon[A-Z0-9]/.test(query) ? query : "");
+          if (candidate) {
+            if (iconExists(candidate)) {
+              const index = getIconsIndex();
+              return {
+                ok: true,
+                query,
+                exactName: candidate,
+                valid: true,
+                approvedNames: [candidate],
+                hits: [
+                  {
+                    name: candidate,
+                    aliases: index.aliasesByName[candidate] ?? "",
+                    category: index.categoryByName[candidate] ?? "",
+                  },
+                ],
+                instruction:
+                  `Use exactly "${candidate}" for this icon. Do not substitute another Icon* name.`,
+              };
+            }
+            const alternatives = closestIconNames(candidate, limit ?? 8);
+            return {
+              ok: false,
+              query,
+              exactName: candidate,
+              valid: false,
+              approvedNames: alternatives.map((h) => h.name),
+              hits: alternatives.map((h) => ({
+                name: h.name,
+                aliases: h.aliases,
+                category: h.category,
+              })),
+              hint:
+                `Icon "${candidate}" does not exist. Pick one returned name verbatim, or search with simpler semantic keywords.`,
+            };
+          }
+
+          const hits = runIconSearch(query, limit ?? 8);
+          if (hits.length === 0) {
+            return {
+              ok: false,
+              query,
+              approvedNames: [],
+              hits: [],
+              hint:
+                "No icons match. Try shorter/simpler keywords or validate a candidate exactName.",
+            };
+          }
+          return {
+            ok: true,
+            query,
+            approvedNames: hits.map((h) => h.name),
+            hits: hits.map((h) => ({
+              name: h.name,
+              aliases: h.aliases,
+              category: h.category,
+            })),
+            instruction:
+              "Use one of approvedNames verbatim. Do not invent an Icon* name that is not in this response.",
+          };
+        },
+      }),
+    },
   });
 
   // Plain text stream — the client reads raw React source and pipes it into

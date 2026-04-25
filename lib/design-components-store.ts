@@ -19,8 +19,9 @@ export type DesignComponent = {
   code: string; // the full TSX source, default-exported
 };
 
-// v20: TextField placeholder color-mix 50% fg-tertiary. v19: JSDoc.
-const STORAGE_KEY = "oc:design-components:v20";
+// v28: large NavBar tightens space above title, adds bottom breathing room.
+// v27: NavBar large variant + badges.
+const STORAGE_KEY = "oc:design-components:v28";
 
 const BUTTON_CODE = `import React, { useState } from 'react';
 import { STYLE } from '../component-tokens';
@@ -691,8 +692,8 @@ export default function TabBar({
         left: 0,
         right: 0,
         bottom: 0,
-        paddingTop: 6,
-        paddingBottom: 'var(--space-safe-bottom)',
+        // Padding (top + safe-bottom) comes from the tab-bar token so the
+        // bar is consistent across screens and easy to retune from one place.
         display: 'flex',
         alignItems: 'stretch',
         justifyContent: 'space-around',
@@ -768,6 +769,448 @@ function TabItem({ tab, active, onClick }) {
 }
 `;
 
+const ICON_SWAP_CODE = `import React, { useState, useEffect, useRef, useId } from 'react';
+import { Icon } from '../centralIcons';
+import { STYLE } from '../component-tokens';
+
+/** IconSwap — central icon with two superpowers:
+ *
+ *  1. Display chip:      \`display\` ∈ 'plain' | 'tinted' | 'filled'
+ *                        Pulls the chip surface + ink from the
+ *                        \`icon-swap-*\` component tokens.
+ *  2. Animated swap:     when \`name\` or \`variant\` changes, the outgoing
+ *                        glyph scales down + blurs out and the incoming
+ *                        glyph scales up + blurs in (Emil-style blur
+ *                        crossfade). Bridges the visual gap so the swap
+ *                        reads as one motion, not two cuts.
+ *
+ *  When \`onClick\` is provided, IconSwap renders as a button with the
+ *  Button-style press scale (0.92). Otherwise it's a passive <span>.
+ *
+ *  Props: name (required), variant ('outlined'|'filled'),
+ *  size (number, default 24), color (CSS, used for 'plain' display),
+ *  display ('plain'|'tinted'|'filled'), onClick, disabled, ariaLabel.
+ *  Pass \`ariaLabel\` whenever the icon is interactive or stands alone
+ *  as content. Decorative icons stay aria-hidden. */
+export default function IconSwap({
+  name,
+  variant = 'outlined',
+  size = 24,
+  color = 'currentColor',
+  display = 'plain',
+  onClick,
+  disabled = false,
+  ariaLabel,
+}) {
+  const reactId = useId();
+  const styleId = 'oc-icon-swap-anim';
+  const reduceMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const [pressed, setPressed] = useState(false);
+  const sig = name + ':' + variant;
+  const [active, setActive] = useState({ name, variant, key: sig + ':0' });
+  const [previous, setPrevious] = useState(null);
+  const tickRef = useRef(0);
+
+  useEffect(() => {
+    if (active.name === name && active.variant === variant) return;
+    if (reduceMotion) {
+      tickRef.current += 1;
+      setActive({ name, variant, key: sig + ':' + tickRef.current });
+      setPrevious(null);
+      return;
+    }
+    tickRef.current += 1;
+    setPrevious(active);
+    setActive({ name, variant, key: sig + ':' + tickRef.current });
+    const t = setTimeout(() => setPrevious(null), 320);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, variant]);
+
+  const chipToken = STYLE['icon-swap-' + display] || STYLE['icon-swap-plain'] || {};
+  // Chip is square + sized relative to the glyph. Plain skips padding so
+  // the icon sits flush with its neighbors.
+  const chipDim = display === 'plain' ? size : Math.round(size * 1.6);
+  const chipStyle = {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: chipDim,
+    height: chipDim,
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    color: display === 'plain' ? color : undefined,
+    ...chipToken,
+  };
+  const layerStyle = {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+    transformOrigin: '50% 50%',
+    willChange: 'transform, filter, opacity',
+  };
+
+  // Inline keyframes — scoped via shared id so multiple IconSwaps
+  // coexist without re-declaring the rules.
+  const keyframes =
+    '@keyframes ocIconSwapIn{from{opacity:0;transform:scale(0.6);filter:blur(8px);}' +
+    'to{opacity:1;transform:scale(1);filter:blur(0);}}' +
+    '@keyframes ocIconSwapOut{from{opacity:1;transform:scale(1);filter:blur(0);}' +
+    'to{opacity:0;transform:scale(0.6);filter:blur(8px);}}';
+
+  const glyph = (layer, kind) => (
+    <span
+      key={layer.key}
+      aria-hidden
+      style={{
+        ...layerStyle,
+        animation: reduceMotion
+          ? 'none'
+          : (kind === 'in'
+              ? 'ocIconSwapIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both'
+              : 'ocIconSwapOut 280ms cubic-bezier(0.22, 1, 0.36, 1) both'),
+      }}
+    >
+      <Icon
+        name={layer.name}
+        variant={layer.variant}
+        size={size}
+        color="currentColor"
+      />
+    </span>
+  );
+
+  const inner = (
+    <>
+      <style id={styleId} dangerouslySetInnerHTML={{ __html: keyframes }} />
+      {previous ? glyph(previous, 'out') : null}
+      {glyph(active, 'in')}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onPointerDown={() => setPressed(true)}
+        onPointerUp={() => setPressed(false)}
+        onPointerLeave={() => setPressed(false)}
+        onPointerCancel={() => setPressed(false)}
+        style={{
+          ...chipStyle,
+          padding: 0,
+          border: 'none',
+          background: chipStyle.background,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.5 : 1,
+          touchAction: 'manipulation',
+          WebkitTapHighlightColor: 'transparent',
+          outline: 'none',
+          transform: pressed && !disabled ? 'scale(0.92)' : 'scale(1)',
+          transition: reduceMotion
+            ? 'none'
+            : 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <span
+      role={ariaLabel ? 'img' : undefined}
+      aria-label={ariaLabel}
+      aria-hidden={ariaLabel ? undefined : true}
+      style={chipStyle}
+      data-icon-id={reactId}
+    >
+      {inner}
+    </span>
+  );
+}
+`;
+
+const NAV_BAR_CODE = `import React, { useState } from 'react';
+import { Icon } from '../centralIcons';
+import { STYLE } from '../component-tokens';
+
+/** NavBar — iOS-style top bar with a unified action API.
+ *
+ *  Variants:
+ *   • 'centered' (default) — small headline title centered between leading
+ *     and trailing actions. The classic iOS detail bar.
+ *   • 'large'              — large-title pattern (Mail, Notes, Settings).
+ *     Title is left-aligned in its own row beneath the action row, uses
+ *     \`largeTitle\` typography. Optional \`subtitle\` sits below the title
+ *     in \`footnote\` ink. \`leading\` is silently ignored in this mode —
+ *     iOS large-title bars don't carry a leading action.
+ *
+ *  Props:
+ *   • title              — string or node (optional)
+ *   • subtitle           — string (only shown in 'large' variant)
+ *   • variant            — 'centered' | 'large'  (default 'centered')
+ *   • leading            — { kind: 'icon' | 'text', ... } (optional;
+ *                           ignored when variant === 'large')
+ *   • trailing           — { kind: 'icon' | 'text', ... } (optional)
+ *   • secondaryTrailing  — { icon, onClick?, ariaLabel, badge? } (icon-only,
+ *                           optional; renders only when \`trailing\` is set,
+ *                           sits to its left like iOS detail screens)
+ *   • ariaLabel          — \`role="banner"\` label (default "Main")
+ *
+ *  Action shape:
+ *    { kind: 'icon', icon: 'IconArrowLeft', onClick?, ariaLabel?, badge? }
+ *    { kind: 'text', label: 'Cancel',       onClick?, ariaLabel?, badge? }
+ *
+ *  \`badge\` accepts:
+ *    true                — solid 8px dot (no number)
+ *    number | string     — pill with the value (e.g. 3, '99+')
+ *
+ *  Tokens: \`nav-bar\`, \`nav-bar-title\`, \`nav-bar-title-large\`,
+ *  \`nav-bar-subtitle\`, \`nav-bar-icon-button\`, \`nav-bar-text-action\`,
+ *  \`nav-bar-badge\`. Press feedback is a small scale transform — no fill. */
+export default function NavBar({
+  title,
+  subtitle,
+  variant = 'centered',
+  leading,
+  trailing,
+  secondaryTrailing,
+  ariaLabel = 'Main',
+}) {
+  const barToken = STYLE['nav-bar'] || {};
+  const titleToken = STYLE['nav-bar-title'] || {};
+  const titleLargeToken = STYLE['nav-bar-title-large'] || {};
+  const subtitleToken = STYLE['nav-bar-subtitle'] || {};
+  const iconBase = STYLE['nav-bar-icon-button'] || {};
+  const textBase = STYLE['nav-bar-text-action'] || {};
+  const badgeToken = STYLE['nav-bar-badge'] || {};
+  // Secondary trailing only makes sense when there's a primary trailing
+  // action — silently ignored otherwise so callers don't have to guard.
+  const secondary = trailing ? secondaryTrailing : null;
+  // The 'large' variant intentionally hides any leading action — iOS
+  // large-title bars don't carry one.
+  const showLeading = variant !== 'large' && leading;
+  const isLarge = variant === 'large';
+  return (
+    <header
+      role="banner"
+      aria-label={ariaLabel}
+      style={{
+        position: 'relative',
+        zIndex: 10,
+        WebkitFontSmoothing: 'antialiased',
+        ...barToken,
+      }}
+    >
+      <div
+        style={{
+          position: 'relative',
+          // Lock the row directly under the safe-area inset to 44px.
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+          }}
+        >
+          {showLeading ? (
+            <NavAction
+              action={leading}
+              iconBase={iconBase}
+              textBase={textBase}
+              badgeToken={badgeToken}
+            />
+          ) : null}
+        </div>
+        {!isLarge && title != null ? (
+          <h1
+            style={{
+              margin: 0,
+              maxWidth: '100%',
+              padding: '0 88px',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              textAlign: 'center',
+              width: '100%',
+              lineHeight: 1.2,
+              ...titleToken,
+            }}
+          >
+            {title}
+          </h1>
+        ) : null}
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 1,
+            height: 44,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 4,
+          }}
+        >
+          {secondary ? (
+            <NavAction
+              action={{ kind: 'icon', ...secondary }}
+              iconBase={iconBase}
+              textBase={textBase}
+              badgeToken={badgeToken}
+            />
+          ) : null}
+          {trailing ? (
+            <NavAction
+              action={trailing}
+              iconBase={iconBase}
+              textBase={textBase}
+              badgeToken={badgeToken}
+            />
+          ) : null}
+        </div>
+      </div>
+      {isLarge && (title != null || subtitle) ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 2,
+            // Tight against the action row above, but with a comfortable
+            // gap below to the screen content.
+            paddingTop: 0,
+            paddingBottom: 'var(--space-md)',
+          }}
+        >
+          {title != null ? (
+            <h1
+              style={{
+                margin: 0,
+                width: '100%',
+                lineHeight: 1.15,
+                ...titleLargeToken,
+              }}
+            >
+              {title}
+            </h1>
+          ) : null}
+          {subtitle ? (
+            <span style={{ ...subtitleToken }}>{subtitle}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+function NavAction({ action, iconBase, textBase, badgeToken }) {
+  const [pressed, setPressed] = useState(false);
+  const reduceMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!action) return null;
+  const isText = action.kind === 'text';
+  const baseStyle = isText ? textBase : iconBase;
+  const ariaLabel =
+    action.ariaLabel || (isText ? action.label : undefined);
+  const hasBadge = action.badge != null && action.badge !== false;
+  return (
+    <button
+      type="button"
+      onClick={() => action.onClick && action.onClick()}
+      aria-label={ariaLabel}
+      onPointerDown={() => setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
+      style={{
+        position: 'relative',
+        touchAction: 'manipulation',
+        WebkitTapHighlightColor: 'transparent',
+        outline: 'none',
+        // Match the Button press feel: small scale-down only, no fill.
+        transform: pressed ? 'scale(0.92)' : 'scale(1)',
+        transition: reduceMotion
+          ? 'none'
+          : 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        ...baseStyle,
+      }}
+    >
+      {isText ? (
+        action.label
+      ) : (
+        <Icon
+          name={action.icon}
+          variant="outlined"
+          size={22}
+          color="currentColor"
+        />
+      )}
+      {hasBadge ? (
+        <NavBadge value={action.badge} token={badgeToken} />
+      ) : null}
+    </button>
+  );
+}
+
+function NavBadge({ value, token }) {
+  // \`true\` => bare dot (no label). number/string => pill with content.
+  const isDot = value === true;
+  const dotStyle = {
+    ...token,
+    minWidth: 8,
+    width: 8,
+    height: 8,
+    padding: 0,
+  };
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        pointerEvents: 'none',
+        ...(isDot ? dotStyle : token),
+      }}
+    >
+      {isDot ? null : value}
+    </span>
+  );
+}
+`;
+
 const DEFAULTS: DesignComponent[] = [
   {
     id: "c_button",
@@ -805,11 +1248,25 @@ const DEFAULTS: DesignComponent[] = [
     code: TAB_BAR_CODE,
   },
   {
+    id: "c_nav_bar",
+    name: "NavBar",
+    description:
+      "iOS top nav bar with two layouts. variant='centered' (default): small headline title centered, optional leading/trailing/secondary actions. variant='large': big left-aligned largeTitle row + optional subtitle (no leading); trailing icons can carry a numeric/dot badge. Props: title, subtitle, variant, leading, trailing, secondaryTrailing, ariaLabel.",
+    code: NAV_BAR_CODE,
+  },
+  {
     id: "c_switch",
     name: "Switch",
     description:
       "iOS toggle switch. 51x31 track, brand when on. Props: checked, defaultChecked, onChange, disabled, label, ariaLabel.",
     code: SWITCH_CODE,
+  },
+  {
+    id: "c_icon_swap",
+    name: "IconSwap",
+    description:
+      "Central icon with optional display chip (plain | tinted | filled) and a blur+scale crossfade when name/variant changes. Pass onClick to make it a press-scale button. Props: name, variant, size, color, display, onClick, disabled, ariaLabel.",
+    code: ICON_SWAP_CODE,
   },
   {
     id: "c_segmented_control",

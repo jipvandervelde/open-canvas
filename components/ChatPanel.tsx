@@ -390,7 +390,128 @@ function searchProjectCodebase(
   };
 }
 
+function exportedApiSummary(code: string): string {
+  const exports: string[] = [];
+  for (const raw of code.split("\n")) {
+    const line = raw.trim();
+    const fn = line.match(
+      /^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/,
+    );
+    if (fn) {
+      exports.push(`${fn[1]}(${fn[2].replace(/\s+/g, " ").trim()})`);
+      continue;
+    }
+    const constant = line.match(/^export\s+const\s+([A-Za-z_$][\w$]*)\s*=/);
+    if (constant) {
+      exports.push(constant[1]);
+      continue;
+    }
+    const named = line.match(/^export\s+\{\s*([^}]+)\s*\}/);
+    if (named) {
+      exports.push(
+        ...named[1]
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      );
+    }
+  }
+  return exports.slice(0, 12).join(", ");
+}
 
+function buildSubAgentProjectContext(): string {
+  const lines: string[] = [];
+  const components = designComponentsStore.get();
+  const services = designServicesStore.get();
+  const entities = designDataStore.get();
+  const routes = routeTableStore.get();
+
+  if (
+    components.length === 0 &&
+    services.length === 0 &&
+    entities.length === 0 &&
+    routes.length === 0
+  ) {
+    return "";
+  }
+
+  lines.push(
+    "Current shared project context (auto-injected; use these exact imports when relevant):",
+  );
+
+  if (components.length > 0) {
+    lines.push("");
+    lines.push("Shared components:");
+    for (const c of components) {
+      lines.push(
+        `- import ${c.name} from './components/${c.name}'; — ${c.description || "(no description)"}`,
+      );
+    }
+  }
+
+  if (services.length > 0) {
+    lines.push("");
+    lines.push("Shared services:");
+    for (const s of services) {
+      const api = exportedApiSummary(s.code);
+      lines.push(
+        `- ./services/${s.name} — ${s.description || "(no description)"}${api ? ` · exports: ${api}` : ""}`,
+      );
+    }
+    lines.push(
+      "If a service owns state or calculations used by multiple screens, import and use it. Do not duplicate that state or hardcode derived values inside this screen.",
+    );
+  }
+
+  if (entities.length > 0) {
+    lines.push("");
+    lines.push("Shared data entities:");
+    for (const e of entities) {
+      const fields = e.fields.map((f) => `${f.name}:${f.type}`).join(", ");
+      lines.push(
+        `- import { ${e.name}, find${e.singular}, list${e.singular}s } from './data/${e.name}'; — ${e.description || "(no description)"} · fields: ${fields} · ${e.seeds.length} seed row${e.seeds.length === 1 ? "" : "s"}`,
+      );
+    }
+    lines.push(
+      "Render lists from the shared entity and look up records with find{Singular}(id). Do not inline a second hardcoded copy of the same data.",
+    );
+  }
+
+  if (routes.length > 0) {
+    lines.push("");
+    lines.push("Available routes:");
+    for (const r of routes) {
+      lines.push(`- ${r.name}: ${r.path}`);
+    }
+    lines.push(
+      "Use Link/navigate from './services/router' for internal navigation and querystring params for record ids.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function numberedSourceExcerpt(code: string, maxLines = 260): string {
+  const lines = code.split("\n");
+  const shown = lines.slice(0, maxLines);
+  const width = String(Math.min(lines.length, maxLines)).length;
+  const body = shown
+    .map((line, i) => `${String(i + 1).padStart(width, " ")}| ${line}`)
+    .join("\n");
+  if (lines.length <= maxLines) return body;
+  return `${body}\n... (${lines.length - maxLines} more lines omitted)`;
+}
+
+function lineNumbersForNeedle(code: string, needle: string): number[] {
+  if (!needle) return [];
+  const lines = code.split("\n");
+  const out: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(needle)) out.push(i + 1);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -1172,8 +1293,10 @@ export function LeftPanel() {
                     .join("\n")
                 : "";
             const sheetHint = `This screen IS A SHEET / MODAL / NESTED VIEW over parent "${parent.props.name}". The user slides it up from the bottom to perform ONE focused task, then dismisses to return to the parent. Include: a grabber (36×5 rounded bar at top), a backdrop-dim assumption (you don't render the backdrop yourself — we'll composite it over the parent), a dismiss affordance (swipe down OR an explicit close button), and the sheet's top should round its first 16px of corner-radius. The sheet's content fills the rest. Do NOT recreate the parent's top bar or tab bar — a sheet overlays them, doesn't replace them.`;
+            const autoContext = buildSubAgentProjectContext();
             const sharedContext = [
               args.sharedContext ?? "",
+              autoContext,
               sheetHint,
               siblingBlock,
             ]
@@ -1398,7 +1521,12 @@ export function LeftPanel() {
                     .map((s) => `- ${s.name} (${s.viewportId}): ${s.brief}`)
                     .join("\n")
                 : "";
-            const sharedContext = [args.sharedContext ?? "", siblingBlock]
+            const autoContext = buildSubAgentProjectContext();
+            const sharedContext = [
+              args.sharedContext ?? "",
+              autoContext,
+              siblingBlock,
+            ]
               .filter(Boolean)
               .join("\n\n");
 
@@ -1880,22 +2008,16 @@ export function LeftPanel() {
           // Apply edits sequentially. If any fails, return without mutating
           // the shape — caller can then retry with corrected oldStrings.
           let next = shape.props.code;
+          let skippedNoops = 0;
           for (let i = 0; i < args.edits.length; i++) {
             const edit = args.edits[i];
             if (edit.oldString === edit.newString) {
-              addToolResult({
-                tool: "editScreen",
-                toolCallId: toolCall.toolCallId,
-                output: {
-                  ok: false,
-                  id: args.id,
-                  error: `Edit #${i + 1}: oldString equals newString (no-op).`,
-                },
-              });
-              return;
+              skippedNoops += 1;
+              continue;
             }
             if (edit.replaceAll) {
               if (!next.includes(edit.oldString)) {
+                const firstLine = edit.oldString.split("\n")[0]?.trim();
                 addToolResult({
                   tool: "editScreen",
                   toolCallId: toolCall.toolCallId,
@@ -1904,6 +2026,13 @@ export function LeftPanel() {
                     id: args.id,
                     error: `Edit #${i + 1}: oldString not found in screen code. Include surrounding context to make the match work; copy from the latest source.`,
                     failedEdit: i,
+                    failedOldString: edit.oldString,
+                    candidateLineNumbers: firstLine
+                      ? lineNumbersForNeedle(next, firstLine)
+                      : [],
+                    sourceSnapshot: numberedSourceExcerpt(next),
+                    retryInstruction:
+                      "Do not retry the same oldString. Use sourceSnapshot to copy an exact current substring, or call updateScreen with the full corrected code if several edits overlap.",
                   },
                 });
                 return;
@@ -1912,6 +2041,7 @@ export function LeftPanel() {
             } else {
               const firstIdx = next.indexOf(edit.oldString);
               if (firstIdx < 0) {
+                const firstLine = edit.oldString.split("\n")[0]?.trim();
                 addToolResult({
                   tool: "editScreen",
                   toolCallId: toolCall.toolCallId,
@@ -1920,6 +2050,13 @@ export function LeftPanel() {
                     id: args.id,
                     error: `Edit #${i + 1}: oldString not found in screen code. Copy the exact substring from the current source.`,
                     failedEdit: i,
+                    failedOldString: edit.oldString,
+                    candidateLineNumbers: firstLine
+                      ? lineNumbersForNeedle(next, firstLine)
+                      : [],
+                    sourceSnapshot: numberedSourceExcerpt(next),
+                    retryInstruction:
+                      "Do not retry the same oldString. Use sourceSnapshot to copy an exact current substring, or call updateScreen with the full corrected code if several edits overlap.",
                   },
                 });
                 return;
@@ -1929,14 +2066,20 @@ export function LeftPanel() {
                 firstIdx + edit.oldString.length,
               );
               if (secondIdx >= 0) {
+                const matchCount = next.split(edit.oldString).length - 1;
                 addToolResult({
                   tool: "editScreen",
                   toolCallId: toolCall.toolCallId,
                   output: {
                     ok: false,
                     id: args.id,
-                    error: `Edit #${i + 1}: oldString matches ${next.split(edit.oldString).length - 1} times — include more surrounding context for a unique match, or set replaceAll: true.`,
+                    error: `Edit #${i + 1}: oldString matches ${matchCount} times — include more surrounding context for a unique match, or set replaceAll: true.`,
                     failedEdit: i,
+                    matchCount,
+                    failedOldString: edit.oldString,
+                    sourceSnapshot: numberedSourceExcerpt(next),
+                    retryInstruction:
+                      "Use sourceSnapshot to include enough exact surrounding context for one unique match, set replaceAll only for a truly mechanical global change, or call updateScreen with the full corrected code.",
                   },
                 });
                 return;
@@ -1949,6 +2092,22 @@ export function LeftPanel() {
           }
 
           const prevCode = shape.props.code;
+          if (next === prevCode) {
+            addToolResult({
+              tool: "editScreen",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: true,
+                id: targetId,
+                status: "success",
+                noop: true,
+                skippedNoops,
+                totalLines: prevCode.split("\n").length,
+              },
+            });
+            return;
+          }
+
           const diff = lineDiff(prevCode, next);
           screenStatusStore.bumpVersion(targetId);
           editor.updateShape({
@@ -3977,11 +4136,10 @@ function DataEntityCard({ part }: { part: Record<string, unknown> }) {
 }
 
 /**
- * Card for `reviewScreen`. The reviewer runs its own Kimi call server-side
- * with thinking ON; `/api/review-screen` streams both the reasoning and
- * the JSON body back as NDJSON, which the client pushes into
- * reviewStreamStore. This card subscribes so the user can watch the
- * reviewer think in real time, and after it finishes the same transcript
+ * Card for `reviewScreen`. The review route runs a quick server-side scout,
+ * streams focused sub-reviewer progress plus issue events as NDJSON, and
+ * returns a merged JSON body. This card subscribes so the user can watch the
+ * review progress in real time, and after it finishes the same transcript
  * stays expandable so you can read back what it concluded.
  */
 function ReviewScreenCard({ part }: { part: Record<string, unknown> }) {

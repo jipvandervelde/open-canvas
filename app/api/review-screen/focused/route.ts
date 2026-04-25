@@ -12,8 +12,8 @@
  * into its own aggregate list (deduping by location+problem).
  *
  * Thinking is OFF here on purpose — the focus is narrow enough that
- * lengthy reasoning is net-negative. The parent reviewer carries the
- * thinking budget; the children are cheap, fast, parallel workers.
+ * lengthy reasoning is net-negative. The parent scout is also bounded and
+ * thinking-OFF; these children do the actual review work in parallel.
  */
 
 import { generateText } from "ai";
@@ -84,6 +84,7 @@ const FOCUS_RUBRICS: Record<string, { title: string; rubric: string }> = {
 - Detail screens read params with \`const { id } = useParams();\` from './services/router'.
 - Internal navigation uses <Link> from './services/router', NOT <a href>.
 - Shared data comes from './data/{entity}' imports — not inlined arrays that would drift between screens.
+- Transactional values shown across screens (cart count, subtotal, tax, delivery fee, total, address/payment, order id) come from a shared service/helper — not hardcoded or independently recomputed in this screen.
 - Route paths used actually exist in the project (don't link to dead routes).`,
   },
 };
@@ -94,6 +95,8 @@ export async function POST(req: Request) {
     viewportId,
     code,
     focus,
+    brief,
+    hint,
     projectDoc,
     designDoc,
     tokens,
@@ -104,6 +107,8 @@ export async function POST(req: Request) {
     viewportId: string;
     code: string;
     focus: string;
+    brief?: string;
+    hint?: string;
     projectDoc?: string;
     designDoc?: string;
     tokens?: import("@/lib/agent-framing").TokensSnapshot;
@@ -150,6 +155,8 @@ Rules:
 
   const prompt = `Screen: ${screenName}
 Viewport: ${viewportId}
+${brief ? `\nBuilder brief:\n${brief}\n` : ""}
+${hint ? `\nScout hint for this focused pass:\n${hint}\n` : ""}
 
 --- /App.js ---
 ${code}

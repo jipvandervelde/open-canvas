@@ -1,45 +1,13 @@
 /**
- * Reviewer — runs as an AGENT, not a one-shot streamText call.
+ * Reviewer orchestration.
  *
- * The old implementation was a single generate-and-emit-JSON pass: the model
- * reasoned silently for tens of seconds and only spoke at the very end. That
- * matched exactly the "monolithic thinking" anti-pattern the BRAINSTORM §14.5
- * calls out. The fix is to let the reviewer drive its own cadence via tools
- * — think, flagIssue, spawnSubReviewer, finalize — so each artifact becomes
- * a visible streaming event instead of hidden rumination.
- *
- * Pipeline shape:
- *   1. streamText({ thinking: true, stopWhen: stepCountIs(20), tools: {...} })
- *   2. Walk fullStream — forward reasoning / text deltas, and detect
- *      tool-call events (think / flagIssue / finalize / spawnSubReviewer).
- *   3. Each tool with `execute` runs server-side and the result flows back
- *      to the model automatically for the next step (AI SDK handles the
- *      multi-step loop, preserving Kimi's `reasoning_content` between
- *      turns — required by K2.6 when thinking is on).
- *   4. At end, emit the aggregated { summary, issues } payload in the
- *      backward-compatible `done` event so ReviewScreenCard still works.
- *
- * Sub-reviewers: spawnSubReviewer({focus}) POSTs to
- * /api/review-screen/focused, which runs a thinking-OFF focused pass and
- * returns JSON issues. The parent reviewer then decides which of those
- * to promote into its own aggregate (via flagIssue) — it doesn't blindly
- * merge, because the parent has the cross-cutting context and can drop
- * low-value duplicates.
- *
- * NDJSON events the client consumes:
- *   { kind: "reasoning", delta }                             // hidden thought
- *   { kind: "text", delta }                                  // visible text (rare)
- *   { kind: "think", topic, thought }                        // visible chip
- *   { kind: "issue", issue: { severity, category, ... } }    // accumulate live
- *   { kind: "sub-reviewer-start", focus }                    // card decoration
- *   { kind: "sub-reviewer-done", focus, issueCount, error? }
- *   { kind: "summary", summary }                             // finalize tool
- *   { kind: "done", ok, reasoning, text, parsed }            // final payload
- *   { kind: "error", error }
+ * The top-level reviewer is intentionally shallow: one thinking-OFF scout
+ * pass chooses the relevant focus lanes, then focused thinking-OFF reviewers
+ * run in parallel. This avoids the old failure mode where one reviewer spent
+ * most of the wall time inside its own thinking context before delegating.
  */
 
-import { streamText, stepCountIs, tool } from "ai";
-import { z } from "zod";
+import { generateText } from "ai";
 import { kimi } from "@/lib/kimi";
 import {
   CORE_RULES,
@@ -48,7 +16,7 @@ import {
 } from "@/lib/design-principles";
 import { buildAgentFraming } from "@/lib/agent-framing";
 
-export const maxDuration = 120;
+export const maxDuration = 90;
 
 const FOCUS_SLUGS = [
   "accessibility",
@@ -60,32 +28,188 @@ const FOCUS_SLUGS = [
 ] as const;
 type FocusSlug = (typeof FOCUS_SLUGS)[number];
 
-const REVIEWER_SYSTEM = `You are a senior design engineer reviewing ONE React screen against a design-engineering rubric. You work as an AGENT — you do not dump a wall of JSON at the end. You drive the review via tool calls so each issue lands as a visible artifact the moment you find it.
+type Issue = {
+  severity: string;
+  category: string;
+  location: string;
+  problem: string;
+  fix: string;
+};
 
-## Your tools
+type Usage = {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+};
 
-- **think({ topic, thought })** — Surface ONE short unit of reasoning as a visible chip. Use when you just decided WHAT to focus on, found a pattern worth calling out, or explain your prioritization. 1–3 sentences. Not a replacement for flagIssue — think is a preamble, not an issue.
-- **flagIssue({ severity, category, location, problem, fix })** — Emit ONE specific issue. Fire this AS SOON AS you spot an issue — don't wait until the end. Severity: high (actually broken / inaccessible), medium (clear polish miss), low (nit). Fix must be a concrete one-liner, not "improve X".
-- **spawnSubReviewer({ focus })** — Fan out a narrower, thinking-OFF focused review on ONE category. Returns that category's issues. Use when the screen has enough surface area that a specialist will catch things you'd miss. Valid focuses: ${FOCUS_SLUGS.join(", ")}. You can fire multiple spawnSubReviewer calls in ONE turn to fan out in parallel.
-- **finalize({ summary })** — Call this EXACTLY ONCE as your last action. One short sentence — overall verdict.
+type ScoutResult = {
+  summary: string;
+  focuses: Array<{ focus: FocusSlug; reason: string }>;
+};
 
-## Cadence rules — non-negotiable
+const EMPTY_USAGE: Usage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+  totalTokens: 0,
+};
 
-1. **Don't ruminate.** If you catch yourself planning all the issues in hidden thought before emitting any tool call, STOP. Emit \`think({topic: "triaging", thought: "..."})\` or fire the first flagIssue right now.
-2. **One issue per tool call.** Don't batch — each flagIssue is a separate streaming artifact. The user watches them arrive.
-3. **Prefer spawning specialists when useful.** For a screen with a form, a tab bar, and animations, spawn the forms + motion focused reviewers early; they run in parallel while you scan for cross-cutting issues.
-4. **Max 8 issues total** (your own flagIssue calls + sub-reviewer issues you keep). Be picky — surface the worst offenders.
-5. **Always end with finalize({ summary })**. Without it the loop won't close cleanly.
+const SCOUT_SYSTEM = `You are a fast review scout for ONE React screen.
 
-## Prioritization
+Your job is NOT to fully review the screen. Do one quick pass and choose the focused reviewers that should inspect it further.
 
-- High: accessibility blockers (no aria-label on icon-only, tap target < 44px, form input < 16px), navigation broken (list→detail params missing), data-flow bugs.
-- Medium: visual inconsistency with siblings, \`transition: all\`, layout shift, missing focus state.
-- Low: token drift, spacing nits, copy polish.
+Output ONLY valid JSON, no prose, no code fences:
 
-## Scope
+{
+  "summary": "one short scout summary",
+  "focuses": [
+    { "focus": "accessibility" | "motion" | "forms" | "layout" | "visual-consistency" | "navigation", "reason": "why this lane matters for this screen" }
+  ]
+}
 
-Consider ONLY the screen you're looking at. Do not invent cross-screen issues unless the source itself makes them obvious.`;
+Rules:
+- Choose 2-4 focus lanes normally; choose 5 only for complex screens with forms + navigation + animation.
+- Include "forms" when the screen has inputs, controls, or submit flows.
+- Include "navigation" when it imports router/data, links to other screens, is part of checkout/onboarding/detail flows, or displays shared transactional values.
+- Include "motion" only when the code uses framer-motion, transitions, animations, pressed transforms, or dynamic show/hide states.
+- Include "layout" for dense mobile screens, long lists, sticky bottom actions, images, or dynamic numeric content.
+- Include "accessibility" for icon-only controls, forms, images, tappable list rows, or unclear buttons.
+- Include "visual-consistency" when the screen uses many raw values, repeated surfaces, token-heavy styling, or should match siblings.
+- Do not list duplicate focuses.`;
+
+function isFocus(value: unknown): value is FocusSlug {
+  return (
+    typeof value === "string" &&
+    (FOCUS_SLUGS as readonly string[]).includes(value)
+  );
+}
+
+function addUsage(total: Usage, next?: Partial<Usage>) {
+  if (!next) return;
+  total.inputTokens += next.inputTokens ?? 0;
+  total.outputTokens += next.outputTokens ?? 0;
+  total.reasoningTokens += next.reasoningTokens ?? 0;
+  total.totalTokens += next.totalTokens ?? 0;
+}
+
+function parseScout(text: string): ScoutResult | null {
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:\w+)?\n/, "").replace(/\n```\s*$/, "");
+  }
+  const open = cleaned.indexOf("{");
+  const close = cleaned.lastIndexOf("}");
+  if (open < 0 || close <= open) return null;
+  try {
+    const parsed = JSON.parse(cleaned.slice(open, close + 1)) as {
+      summary?: unknown;
+      focuses?: unknown;
+    };
+    if (!Array.isArray(parsed.focuses)) return null;
+    const seen = new Set<FocusSlug>();
+    const focuses: ScoutResult["focuses"] = [];
+    for (const item of parsed.focuses) {
+      const row = item as { focus?: unknown; reason?: unknown };
+      if (!isFocus(row.focus) || seen.has(row.focus)) continue;
+      seen.add(row.focus);
+      focuses.push({
+        focus: row.focus,
+        reason:
+          typeof row.reason === "string" && row.reason.trim()
+            ? row.reason.trim()
+            : "Relevant to this screen.",
+      });
+    }
+    if (focuses.length === 0) return null;
+    return {
+      summary:
+        typeof parsed.summary === "string" && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : "Scout selected focused review lanes.",
+      focuses,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function heuristicScout(code: string, brief?: string): ScoutResult {
+  const haystack = `${brief ?? ""}\n${code}`.toLowerCase();
+  const picks: ScoutResult["focuses"] = [
+    {
+      focus: "layout",
+      reason: "Baseline layout, safe-area, numeric, and image checks apply to every generated screen.",
+    },
+    {
+      focus: "visual-consistency",
+      reason: "Generated screens often drift on tokens, surfaces, spacing, and typography.",
+    },
+  ];
+
+  if (
+    /\b(input|textarea|select|form|checkbox|switch|radio|password|email|submit)\b/.test(
+      haystack,
+    )
+  ) {
+    picks.push({
+      focus: "forms",
+      reason: "The code appears to include form fields or submit/control behavior.",
+    });
+  }
+  if (
+    /\b(link|navigate|useparams|router|href|detail|checkout|cart|order|confirmation|payment|data\/)\b/.test(
+      haystack,
+    )
+  ) {
+    picks.push({
+      focus: "navigation",
+      reason: "The screen appears to participate in navigation, shared data, or a transactional flow.",
+    });
+  }
+  if (/\b(framer|motion|transition|animation|transform|opacity)\b/.test(haystack)) {
+    picks.push({
+      focus: "motion",
+      reason: "The code includes motion or transition-related behavior.",
+    });
+  }
+  if (/\b(button|aria-|img|image|icon|onclick|role=|alt=)\b/.test(haystack)) {
+    picks.push({
+      focus: "accessibility",
+      reason: "The screen has interactive controls, icons, or images that need accessibility checks.",
+    });
+  }
+
+  const seen = new Set<FocusSlug>();
+  return {
+    summary: "Heuristic scout selected focused review lanes.",
+    focuses: picks.filter((p) => {
+      if (seen.has(p.focus)) return false;
+      seen.add(p.focus);
+      return true;
+    }).slice(0, 5),
+  };
+}
+
+function dedupeIssues(issues: Issue[]): Issue[] {
+  const seen = new Set<string>();
+  const out: Issue[] = [];
+  const severityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  for (const issue of issues.sort(
+    (a, b) =>
+      (severityRank[a.severity] ?? 3) - (severityRank[b.severity] ?? 3),
+  )) {
+    const key = `${issue.category}:${issue.location}:${issue.problem}`
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(issue);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
 
 export async function POST(req: Request) {
   const {
@@ -114,8 +238,6 @@ export async function POST(req: Request) {
     iconStyle?: import("@/lib/agent-framing").IconStyleSnapshot;
   } = await req.json();
 
-  // Pull the same contextual principle files the builder saw so the reviewer
-  // checks against the right rubric (form screens get forms-controls, etc).
   const principles = await pickPrinciplesForBrief({
     viewportId,
     brief: brief ?? screenName,
@@ -125,30 +247,7 @@ export async function POST(req: Request) {
     .map((p) => `=== ${p.title} (${p.slug}) ===\n${p.body}`)
     .join("\n\n---\n\n");
 
-  const prompt = `Screen name: ${screenName}
-Viewport: ${viewportId}
-${brief ? `\nBrief the builder received:\n${brief}\n` : ""}
-
---- Screen source (/App.js) ---
-${code}
-
---- Principles (your rubric) ---
-${CORE_RULES}
-
----
-
-${REVIEW_CHECKLIST}
-
----
-
-${principlesBlock}
-
-Begin. Think → flagIssue → (maybe) spawnSubReviewer → more flagIssue → finalize.`;
-
   const encoder = new TextEncoder();
-
-  // Deduce an origin for the sub-reviewer fetch. When deployed we can rely
-  // on the request's origin; locally this resolves to http://localhost:3000.
   const originHint = req.headers.get("origin") ?? new URL(req.url).origin;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -157,267 +256,162 @@ Begin. Think → flagIssue → (maybe) spawnSubReviewer → more flagIssue → f
         try {
           controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
         } catch {
-          /* controller may already be closed on abort — ignore */
+          /* controller may already be closed */
         }
       };
 
-      // The reviewer's aggregate of issues, accumulated across every
-      // flagIssue call AND any sub-reviewer results the agent chose to
-      // promote. We return this in the final `done` payload for the
-      // backward-compatible ReviewScreenCard contract.
-      const aggregate: Array<{
-        severity: string;
-        category: string;
-        location: string;
-        problem: string;
-        fix: string;
-      }> = [];
-      let finalSummary = "";
-      // Cumulative usage from every focused sub-reviewer fetch. Added on
-      // top of the parent reviewer's own usage at the end so the client
-      // sees one authoritative number for the whole review subtree.
-      const subUsage = {
-        inputTokens: 0,
-        outputTokens: 0,
-        reasoningTokens: 0,
-        totalTokens: 0,
-      };
+      const totalUsage: Usage = { ...EMPTY_USAGE };
 
       try {
-        const result = streamText({
-          model: kimi({ thinking: true }),
-          system:
-            buildAgentFraming({
-              projectDoc,
-              designDoc,
-              tokens,
-              componentTokens,
-              iconStyle,
-            }) +
-            "\n\n---\n\n" +
-            REVIEWER_SYSTEM,
-          prompt,
-          stopWhen: stepCountIs(20),
-          tools: {
-            think: tool({
-              description:
-                "Show ONE discrete unit of reasoning as a visible chip. 1-3 sentences. User-facing.",
-              inputSchema: z.object({
-                topic: z.string().describe("2-6 word header."),
-                thought: z
-                  .string()
-                  .describe("1-3 sentence specific, no-hedging thought."),
-              }),
-              execute: async ({ topic, thought }) => {
-                emit({ kind: "think", topic, thought });
-                return { ok: true };
-              },
-            }),
-            flagIssue: tool({
-              description:
-                "Emit ONE specific issue immediately. Severity high|medium|low. Category should name the principle area. Fix must be a concrete one-liner.",
-              inputSchema: z.object({
-                severity: z.enum(["high", "medium", "low"]),
-                category: z
-                  .string()
-                  .describe(
-                    "Principle area — e.g. accessibility, layout, motion, forms, visual, consistency, data, navigation.",
-                  ),
-                location: z
-                  .string()
-                  .describe(
-                    "Short hint: 'submit button', 'recipe card row', 'top app bar'.",
-                  ),
-                problem: z.string().describe("What's wrong — specific."),
-                fix: z
-                  .string()
-                  .describe(
-                    "Concrete one-line instruction for updateScreen / editScreen.",
-                  ),
-              }),
-              execute: async (issue) => {
-                aggregate.push(issue);
-                emit({ kind: "issue", issue });
-                return { ok: true, total: aggregate.length };
-              },
-            }),
-            spawnSubReviewer: tool({
-              description:
-                "Fan out a focused, thinking-OFF sub-reviewer on ONE category. Returns that category's issues. Fire multiple in parallel when the screen has enough surface.",
-              inputSchema: z.object({
-                focus: z
-                  .enum(FOCUS_SLUGS)
-                  .describe(`Category for the sub-reviewer.`),
-              }),
-              execute: async ({ focus }) => {
-                emit({ kind: "sub-reviewer-start", focus });
-                try {
-                  const subRes = await fetch(
-                    `${originHint}/api/review-screen/focused`,
-                    {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        screenName,
-                        viewportId,
-                        code,
-                        focus,
-                      }),
-                    },
-                  );
-                  const data = (await subRes.json()) as {
-                    ok: boolean;
-                    focus: string;
-                    issues?: Array<{
-                      severity?: string;
-                      location?: string;
-                      problem?: string;
-                      fix?: string;
-                    }>;
-                    error?: string;
-                    usage?: {
-                      inputTokens?: number;
-                      outputTokens?: number;
-                      reasoningTokens?: number;
-                      totalTokens?: number;
-                    };
-                  };
-                  if (data.usage) {
-                    subUsage.inputTokens += data.usage.inputTokens ?? 0;
-                    subUsage.outputTokens += data.usage.outputTokens ?? 0;
-                    subUsage.reasoningTokens += data.usage.reasoningTokens ?? 0;
-                    subUsage.totalTokens += data.usage.totalTokens ?? 0;
-                  }
-                  if (!data.ok) {
-                    emit({
-                      kind: "sub-reviewer-done",
-                      focus,
-                      issueCount: 0,
-                      error: data.error ?? "sub-reviewer failed",
-                    });
-                    return {
-                      ok: false,
-                      focus,
-                      error: data.error ?? "sub-reviewer failed",
-                      issues: [],
-                    };
-                  }
-                  const issues = data.issues ?? [];
-                  emit({
-                    kind: "sub-reviewer-done",
-                    focus,
-                    issueCount: issues.length,
-                  });
-                  return { ok: true, focus, issues };
-                } catch (err) {
-                  const message = String(err);
-                  emit({
-                    kind: "sub-reviewer-done",
-                    focus,
-                    issueCount: 0,
-                    error: message,
-                  });
-                  return { ok: false, focus, error: message, issues: [] };
-                }
-              },
-            }),
-            finalize: tool({
-              description:
-                "Call EXACTLY ONCE as your last action. One-sentence overall verdict.",
-              inputSchema: z.object({
-                summary: z.string().describe("One short sentence — verdict."),
-              }),
-              execute: async ({ summary }) => {
-                finalSummary = summary;
-                emit({ kind: "summary", summary });
-                return { ok: true };
-              },
-            }),
-          },
+        emit({
+          kind: "think",
+          topic: "scouting",
+          thought:
+            "Running a quick pass to choose focused review lanes, then delegating those checks in parallel.",
         });
 
-        let reasoning = "";
-        let text = "";
-
-        for await (const part of result.fullStream) {
-          const anyPart = part as unknown as {
-            type: string;
-            text?: string;
-            delta?: string;
-            error?: unknown;
-          };
-          if (anyPart.type === "text-delta") {
-            const delta = anyPart.text ?? anyPart.delta ?? "";
-            if (delta) {
-              text += delta;
-              emit({ kind: "text", delta });
-            }
-          } else if (anyPart.type === "reasoning-delta") {
-            const delta = anyPart.text ?? anyPart.delta ?? "";
-            if (delta) {
-              reasoning += delta;
-              emit({ kind: "reasoning", delta });
-            }
-          } else if (anyPart.type === "error") {
-            emit({
-              kind: "error",
-              error: String(anyPart.error ?? "reviewer error"),
-            });
-          }
-          // tool-call / tool-result / tool-input-delta events also flow
-          // through fullStream, but we already surface them via each tool's
-          // execute() → emit() call above. Skipping them here avoids
-          // double-emission.
-        }
-
-        // Usage — resolved once the stream finishes. Emitted BEFORE `done`
-        // so the client-side reader always has the usage line ahead of the
-        // terminal event it keys off of. We combine the parent reviewer's
-        // own usage with the sum of every focused sub-reviewer we spawned
-        // so the client sees a single authoritative number for the whole
-        // review subtree.
+        let scout = heuristicScout(code, brief);
         try {
-          const own = await result.totalUsage;
-          const combined = {
-            inputTokens:
-              (own?.inputTokens ?? 0) + subUsage.inputTokens,
-            outputTokens:
-              (own?.outputTokens ?? 0) + subUsage.outputTokens,
-            reasoningTokens:
-              (own?.reasoningTokens ?? 0) + subUsage.reasoningTokens,
-            totalTokens:
-              (own?.totalTokens ?? 0) + subUsage.totalTokens,
-          };
-          emit({ kind: "usage", usage: combined });
+          const scoutPrompt = `Screen name: ${screenName}
+Viewport: ${viewportId}
+${brief ? `\nBuilder brief:\n${brief}\n` : ""}
+
+--- /App.js ---
+${code}
+
+--- Review rules available to focused reviewers ---
+${CORE_RULES}
+
+${REVIEW_CHECKLIST}
+
+${principlesBlock}
+
+Choose the focused review lanes now.`;
+
+          const scoutRes = await generateText({
+            model: kimi({ thinking: false }),
+            system:
+              buildAgentFraming({
+                projectDoc,
+                designDoc,
+                tokens,
+                componentTokens,
+                iconStyle,
+              }) +
+              "\n\n---\n\n" +
+              SCOUT_SYSTEM,
+            prompt: scoutPrompt,
+          });
+          addUsage(totalUsage, scoutRes.usage);
+          scout = parseScout(scoutRes.text) ?? scout;
         } catch {
-          // If own usage fails to resolve, still report any sub-reviewer
-          // usage we accumulated so totals don't silently regress.
-          if (subUsage.totalTokens > 0) {
-            emit({ kind: "usage", usage: subUsage });
-          }
+          /* heuristic scout is good enough */
         }
 
-        // Final payload: backward-compatible with the old `{summary, issues}`
-        // contract so ReviewScreenCard keeps working without changes.
+        emit({
+          kind: "think",
+          topic: "delegating",
+          thought: `${scout.summary} Delegating: ${scout.focuses
+            .map((f) => f.focus)
+            .join(", ")}.`,
+        });
+
+        const issues: Issue[] = [];
+        await Promise.all(
+          scout.focuses.map(async ({ focus, reason }) => {
+            emit({ kind: "sub-reviewer-start", focus, reason });
+            try {
+              const subRes = await fetch(
+                `${originHint}/api/review-screen/focused`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    screenName,
+                    viewportId,
+                    code,
+                    focus,
+                    brief,
+                    hint: reason,
+                    projectDoc,
+                    designDoc,
+                    tokens,
+                    componentTokens,
+                    iconStyle,
+                  }),
+                },
+              );
+              const data = (await subRes.json()) as {
+                ok: boolean;
+                focus: string;
+                issues?: Array<Partial<Issue>>;
+                error?: string;
+                usage?: Partial<Usage>;
+              };
+              addUsage(totalUsage, data.usage);
+              if (!data.ok) {
+                emit({
+                  kind: "sub-reviewer-done",
+                  focus,
+                  issueCount: 0,
+                  error: data.error ?? "sub-reviewer failed",
+                });
+                return;
+              }
+              const found = (data.issues ?? [])
+                .map((issue): Issue => ({
+                  severity: issue.severity ?? "low",
+                  category: issue.category ?? focus,
+                  location: issue.location ?? "",
+                  problem: issue.problem ?? "",
+                  fix: issue.fix ?? "",
+                }))
+                .filter((issue) => issue.problem && issue.fix);
+              issues.push(...found);
+              emit({
+                kind: "sub-reviewer-done",
+                focus,
+                issueCount: found.length,
+              });
+              for (const issue of found) {
+                emit({ kind: "issue", issue });
+              }
+            } catch (err) {
+              emit({
+                kind: "sub-reviewer-done",
+                focus,
+                issueCount: 0,
+                error: String(err),
+              });
+            }
+          }),
+        );
+
+        const aggregate = dedupeIssues(issues);
+        const summary =
+          aggregate.length > 0
+            ? `Review complete: ${aggregate.length} issue${aggregate.length === 1 ? "" : "s"} found across ${scout.focuses.length} focused pass${scout.focuses.length === 1 ? "" : "es"}.`
+            : `Review complete: no material issues found across ${scout.focuses.length} focused pass${scout.focuses.length === 1 ? "" : "es"}.`;
+
+        emit({ kind: "summary", summary });
+        emit({ kind: "usage", usage: totalUsage });
         emit({
           kind: "done",
           ok: true,
-          reasoning,
-          text,
+          reasoning: "",
+          text: "",
           parsed: {
-            summary: finalSummary || "Review complete.",
+            summary,
             issues: aggregate,
           },
         });
       } catch (err) {
         emit({ kind: "error", error: String(err) });
-        // Also emit a best-effort done so the client doesn't hang on the
-        // reviewStreamStore "streaming" status indefinitely.
         emit({
           kind: "done",
           ok: false,
           error: String(err),
-          parsed: { summary: "Review failed.", issues: aggregate },
+          parsed: { summary: "Review failed.", issues: [] },
         });
       } finally {
         try {

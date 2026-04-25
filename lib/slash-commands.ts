@@ -62,9 +62,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     expand: (args, ctx) => {
       const target = args.trim() || ctx.selectedScreenName?.trim();
       if (target) {
-        return `Review the "${target}" screen via reviewScreen, then for every HIGH and MEDIUM severity issue returned, fire editScreen (or updateScreen if the fix is too large for a surgical patch) to apply the fix. Batch all edits in parallel in a single assistant message. Do NOT re-review after — one cycle is enough.`;
+        return `Review the "${target}" screen via reviewScreen, then apply every HIGH and MEDIUM severity issue with ONE fix operation for that screen. Use editScreen only when you have exact current source substrings; otherwise use updateScreen with the full corrected code. Do NOT re-review after — one cycle is enough.`;
       }
-      return `Review every screen on the canvas in parallel, then for every HIGH and MEDIUM severity issue returned across ALL screens, batch editScreen/updateScreen calls in parallel in a single assistant message. Do NOT re-review after — one cycle is enough.`;
+      return `Review every screen on the canvas in parallel, then for every screen with HIGH and MEDIUM severity issues, apply one fix operation per screen in parallel. Use editScreen only with exact current source substrings; otherwise use updateScreen with the full corrected code. Do NOT re-review after — one cycle is enough.`;
     },
   },
   {
