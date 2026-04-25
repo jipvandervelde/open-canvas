@@ -7,9 +7,9 @@
  */
 
 const STORAGE_KEY = "oc:left-panel-w";
-export const MIN_WIDTH = 400;
+export const MIN_WIDTH = 440;
 export const MAX_WIDTH = 900;
-const DEFAULT_WIDTH = 400;
+const DEFAULT_WIDTH = 440;
 
 type Listener = (width: number) => void;
 

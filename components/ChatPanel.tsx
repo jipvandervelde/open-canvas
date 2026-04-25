@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
@@ -82,10 +83,7 @@ import {
 } from "@/lib/message-queue-store";
 import { subAgentAbortRegistry } from "@/lib/subagent-abort-registry";
 import { cadenceWatchdog } from "@/lib/cadence-watchdog";
-import {
-  tokenUsageStore,
-  formatTokenCount,
-} from "@/lib/token-usage-store";
+import { tokenUsageStore } from "@/lib/token-usage-store";
 import { resetProject } from "@/lib/project-reset";
 import {
   parseSlashCommand,
@@ -104,6 +102,7 @@ import { designDocStore } from "@/lib/design-doc-store";
 import { NotesPanel } from "@/components/NotesPanel";
 import { ProjectPanel } from "@/components/ProjectPanel";
 import { DesignPanel } from "@/components/DesignPanel";
+import { getIconComponent } from "@/lib/icon-render-client";
 import { ClarifyingQuestionsCard } from "@/components/ClarifyingQuestionsCard";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import {
@@ -401,6 +400,21 @@ type LeftTab =
   | "data"
   | "skills"
   | "notes";
+
+/** Renders a Central Icons glyph in the chat composer (toolbar + send). */
+function ComposerCentralIcon({
+  name,
+  variant = "outlined",
+  size = 18,
+}: {
+  name: string;
+  variant?: "filled" | "outlined";
+  size?: number;
+}) {
+  const C = getIconComponent(name, variant);
+  if (!C) return null;
+  return createElement(C, { size, color: "currentColor", ariaHidden: true });
+}
 
 export function LeftPanel() {
   const { editor } = useEditorRef();
@@ -2501,12 +2515,7 @@ export function LeftPanel() {
       }}
     >
       <LeftPanelResizer />
-      <header
-        className="flex items-center justify-between px-4 py-2.5"
-        style={{
-          boxShadow: "inset 0 -1px 0 0 var(--border-subtle)",
-        }}
-      >
+      <header className="flex items-center justify-between px-4 pt-2.5 pb-1">
         <div className="flex items-center gap-2">
           <span
             className="text-[13px] font-semibold"
@@ -2532,7 +2541,7 @@ export function LeftPanel() {
       </header>
 
       <div
-        className="flex items-center gap-3 px-4 pt-2.5 pb-1"
+        className="oc-tablist flex min-w-0 flex-nowrap items-stretch gap-2 overflow-x-auto px-4"
         style={{
           boxShadow: "inset 0 -1px 0 0 var(--border-subtle)",
         }}
@@ -2542,56 +2551,67 @@ export function LeftPanel() {
           active={activeTab === "chat"}
           onClick={() => setActiveTab("chat")}
           label="Chat"
+          icon="IconChatBubbles"
         />
         <TabButton
           active={activeTab === "code"}
           onClick={() => setActiveTab("code")}
           label="Code"
+          icon="IconCode"
         />
         <TabButton
           active={activeTab === "tokens"}
           onClick={() => setActiveTab("tokens")}
           label="Tokens"
+          icon="IconAiTokens"
         />
         <TabButton
           active={activeTab === "icons"}
           onClick={() => setActiveTab("icons")}
           label="Icons"
+          icon="IconShapesPlusXSquareCircle"
         />
         <TabButton
           active={activeTab === "components"}
           onClick={() => setActiveTab("components")}
           label="Components"
+          icon="IconComponents"
         />
         <TabButton
           active={activeTab === "services"}
           onClick={() => setActiveTab("services")}
           label="Services"
+          icon="IconServer1"
         />
         <TabButton
           active={activeTab === "data"}
           onClick={() => setActiveTab("data")}
           label="Data"
+          icon="IconTable"
         />
         <TabButton
           active={activeTab === "skills"}
           onClick={() => setActiveTab("skills")}
           label="Skills"
+          icon="IconBook"
         />
         <TabButton
           active={activeTab === "notes"}
           onClick={() => setActiveTab("notes")}
           label="Notes"
+          icon="IconNote1"
         />
         <TabButton
           active={activeTab === "project"}
           onClick={() => setActiveTab("project")}
           label="Project"
+          icon="IconFolder1"
         />
         <TabButton
           active={activeTab === "design"}
           onClick={() => setActiveTab("design")}
           label="Design"
+          icon="IconColorPalette"
         />
       </div>
 
@@ -2682,39 +2702,43 @@ export function LeftPanel() {
                   : "Type a message first"
             }
           >
-            {isBusy ? <StopSquareGlyph /> : <SendArrowGlyph />}
+            {isBusy ? (
+              <ComposerCentralIcon name="IconStop" variant="filled" size={14} />
+            ) : (
+              <ComposerCentralIcon
+                name="IconArrowCornerDownLeft"
+                variant="filled"
+                size={14}
+              />
+            )}
           </button>
         </div>
 
         <div className="oc-composer-toolbar">
-          <div className="oc-composer-toolbar-group">
+          <div className="oc-composer-toolbar-group oc-composer-toolbar-group--leading">
             <button
               type="button"
               onClick={handleSendSketch}
               disabled={isBusy || sketchBusy}
               title="Attach the current selection (or all shapes) as a sketch"
-              className="oc-composer-tool"
+              className="oc-composer-tool oc-composer-tool--icon"
               aria-label="Attach sketch"
             >
-              <PlusGlyph />
+              <ComposerCentralIcon name="IconPlusSmall" variant="outlined" size={18} />
             </button>
             <button
               type="button"
-              className="oc-composer-tool"
+              className="oc-composer-tool oc-composer-tool--icon"
               title="Voice input (coming soon)"
               aria-label="Voice input"
               disabled
             >
-              <MicGlyph />
+              <ComposerCentralIcon name="IconMicrophone" variant="outlined" size={18} />
             </button>
           </div>
-          <div className="oc-composer-toolbar-group">
+          <div className="oc-composer-toolbar-group oc-composer-toolbar-group--trailing">
             <ModelPicker />
             <ThinkingToggle />
-            <TokenCounter
-              isBusy={isBusy}
-              queuedCount={queuedMessages.length}
-            />
           </div>
         </div>
       </form>
@@ -4573,76 +4597,6 @@ function PaperclipIcon() {
   );
 }
 
-function ArrowUpIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M8 13V3M8 3 3.5 7.5M8 3l4.5 4.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/**
- * Small live-updating token counter rendered next to the Think toggle.
- * Replaces the pulsing status dot — still conveys busy/queued state via
- * its trailing indicator (subtle color tick) while showing the running
- * token total as its primary content.
- */
-function TokenCounter({
-  isBusy,
-  queuedCount,
-}: {
-  isBusy: boolean;
-  queuedCount: number;
-}) {
-  const [totals, setTotals] = useState(() => tokenUsageStore.get());
-  useEffect(() => {
-    setTotals(tokenUsageStore.get());
-    return tokenUsageStore.subscribe(setTotals);
-  }, []);
-  const state = isBusy ? "busy" : queuedCount > 0 ? "queued" : "idle";
-  const tooltip =
-    totals.callCount === 0
-      ? "No tokens used yet this session"
-      : `Session total: ${totals.totalTokens.toLocaleString()} tokens across ${totals.callCount} call${totals.callCount === 1 ? "" : "s"}` +
-        (totals.inputTokens
-          ? `\nInput: ${totals.inputTokens.toLocaleString()}`
-          : "") +
-        (totals.outputTokens
-          ? `\nOutput: ${totals.outputTokens.toLocaleString()}`
-          : "") +
-        (totals.reasoningTokens
-          ? `\nReasoning: ${totals.reasoningTokens.toLocaleString()}`
-          : "") +
-        (queuedCount > 0
-          ? `\n${queuedCount} message${queuedCount === 1 ? "" : "s"} queued`
-          : "") +
-        (isBusy ? `\nWorking…` : "");
-  return (
-    <span
-      className="oc-composer-token-counter"
-      data-state={state}
-      title={tooltip}
-    >
-      <span className="oc-composer-token-counter-num oc-tabular">
-        {formatTokenCount(totals.totalTokens)}
-      </span>
-      <span className="oc-composer-token-counter-label">tok</span>
-    </span>
-  );
-}
-
 /**
  * Small "reset" icon button in the chat header. Confirms before nuking
  * every persisted store and reloading the page — purely a
@@ -4682,74 +4636,6 @@ function ResetGlyph() {
         strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SendArrowGlyph() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M8 13V3M8 3 3.5 7.5M8 3l4.5 4.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function StopSquareGlyph() {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      aria-hidden="true"
-    >
-      <rect x="0" y="0" width="10" height="10" rx="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PlusGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M8 3v10M3 8h10"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function MicGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect
-        x="5.5"
-        y="2"
-        width="5"
-        height="8"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-      <path
-        d="M3.5 8a4.5 4.5 0 0 0 9 0M8 12.5V14"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
       />
     </svg>
   );
@@ -5098,21 +4984,35 @@ function TabButton({
   active,
   onClick,
   label,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  icon: string;
 }) {
+  const variant = active ? "filled" : "outlined";
+  const Icon = getIconComponent(icon, variant);
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
+      aria-label={label}
+      title={label}
       onClick={onClick}
       className="oc-tab"
       data-active={active || undefined}
     >
-      {label}
+      <span className="oc-tab-icon-wrap" aria-hidden>
+        {Icon
+          ? createElement(Icon, {
+              size: 20,
+              color: "currentColor",
+              ariaHidden: true,
+            })
+          : null}
+      </span>
     </button>
   );
 }

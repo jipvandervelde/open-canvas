@@ -93,7 +93,7 @@
   --z-toast: 200;
 
   /* Workspace sidebar widths (consumed by TldrawCanvas + panels) */
-  --left-panel-w: 400px;
+  --left-panel-w: 440px;
   --right-panel-w: 460px; /* Preview panel default; overridden by preview-panel-store on hydrate */
 
   /* Chat surfaces — pale brand-tinted user bubble, derived so it tracks brand */
@@ -2420,10 +2420,14 @@ h3 {
   opacity: 0.7;
   cursor: text;
 }
+/* Bottom-anchored to follow the last line when the field grows. Insets are
+   slightly larger than 8px so a single-line pill looks optically centered and
+   the hit target isn’t hugging the right edge. */
 .oc-composer-action {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: auto;
+  bottom: 11px;
+  right: 11px;
   width: 26px;
   height: 26px;
   display: inline-flex;
@@ -2438,6 +2442,10 @@ h3 {
     color 120ms ease-out,
     transform 120ms ease-out;
   box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.oc-composer-action svg {
+  display: block;
+  flex-shrink: 0;
 }
 @media (hover: hover) {
   .oc-composer-action:hover {
@@ -2471,27 +2479,60 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 4px;
+  min-height: 32px;
+  padding: 2px 2px 0;
 }
 .oc-composer-toolbar-group {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
+}
+.oc-composer-toolbar-group--leading {
+  gap: 2px;
+}
+.oc-composer-toolbar-group--trailing {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .oc-composer-tool {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 8px;
+  box-sizing: border-box;
+  min-height: 30px;
+  height: 30px;
+  padding: 0 10px;
   font-size: 12px;
+  line-height: 1;
   font-weight: 500;
   color: var(--text-tertiary);
   background: transparent;
+  border: none;
   border-radius: 8px;
   cursor: pointer;
   transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.oc-composer-tool--icon {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  gap: 0;
+  flex-shrink: 0;
+}
+.oc-composer-tool--think {
+  padding: 0 9px 0 8px;
+  gap: 5px;
+}
+.oc-composer-tool-text {
+  white-space: nowrap;
+}
+.oc-composer-tool > svg,
+.oc-composer-tool--icon svg {
+  display: block;
+  flex-shrink: 0;
 }
 @media (hover: hover) {
   .oc-composer-tool:hover {
@@ -2514,10 +2555,15 @@ h3 {
   }
 }
 .oc-composer-tool-label {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  min-height: 30px;
+  padding: 0 4px 0 0;
   color: var(--text-tertiary);
   font-size: 12px;
+  line-height: 1.2;
   font-weight: 500;
-  padding: 0 2px;
   user-select: none;
 }
 /* Project brief panel — full-height column inside the chat aside with
@@ -2944,63 +2990,6 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--border-subtle);
   white-space: pre;
   tab-size: 2;
-}
-
-/* Live-updating token counter rendered next to the Think toggle. Replaces
-   the old status dot; the counter's left edge carries a tiny indicator
-   that reflects busy / queued / idle state so we don't lose the signal. */
-.oc-composer-token-counter {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  padding: 0 8px 0 10px;
-  height: 22px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--surface-2);
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  position: relative;
-  line-height: 22px;
-  white-space: nowrap;
-  user-select: none;
-  cursor: help;
-}
-.oc-composer-token-counter::before {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-  transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
-}
-.oc-composer-token-counter[data-state="busy"]::before {
-  background: var(--accent-base);
-  animation: oc-composer-status-pulse 1200ms ease-out infinite;
-}
-.oc-composer-token-counter[data-state="queued"]::before {
-  background: var(--state-warn);
-}
-.oc-composer-token-counter-num {
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-.oc-composer-token-counter-label {
-  color: var(--text-tertiary);
-  font-weight: 500;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-@keyframes oc-composer-status-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent-base) 60%, transparent); }
-  70% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent-base) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent-base) 0%, transparent); }
 }
 
 /* Reset button in the chat header — subtle ghost button, bumps to
@@ -5304,20 +5293,64 @@ h3 {
   color: var(--text-primary);
 }
 
-/* Tabs inside the LeftPanel */
+/* Tabs inside the LeftPanel — Central Icons: outlined + fg secondary
+ * inactive, filled + fg primary when selected (see .oc-tab-icon-wrap). */
+.oc-tablist {
+  flex-shrink: 0;
+  /* Fixed row + room for the active underline (::after) without clipping. */
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--text-primary) 18%, transparent)
+    transparent;
+}
+.oc-tablist::-webkit-scrollbar {
+  height: 4px;
+}
+.oc-tablist::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--text-primary) 20%, transparent);
+  border-radius: 2px;
+}
 .oc-tab {
   position: relative;
-  padding: 6px 0;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  color: var(--text-tertiary);
+  flex-shrink: 0;
+  /* Stretch with .oc-tablist (items-stretch) so the active bar can sit on the
+   * real bottom edge — not floated mid-air when the row was center-aligned. */
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 28px;
+  min-height: 0;
+  padding: 0 2px;
+  line-height: 0;
   background: transparent;
   border: none;
   cursor: pointer;
   transition: color 120ms ease-out;
 }
-.oc-tab[data-active] {
+.oc-tab-icon-wrap {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  transition: color 120ms ease-out, opacity 120ms ease-out;
+}
+/* Filled vs outlined SVGs can report different intrinsic sizes — lock the slot. */
+.oc-tab-icon-wrap > svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.oc-tab[data-active] .oc-tab-icon-wrap {
   color: var(--text-primary);
 }
 .oc-tab[data-active]::after {
@@ -5325,14 +5358,15 @@ h3 {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -5px;
+  bottom: 0;
   height: 1.5px;
   background: var(--text-primary);
   border-radius: 2px;
 }
 @media (hover: hover) {
-  .oc-tab:hover {
-    color: var(--text-secondary);
+  .oc-tab:not([data-active]):hover .oc-tab-icon-wrap {
+    color: var(--text-primary);
+    opacity: 0.88;
   }
 }
 

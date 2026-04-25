@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 import {
   modelSettingsStore,
   MODEL_BY_ID,
   type ModelSettings,
 } from "@/lib/model-settings-store";
+import { getIconComponent } from "@/lib/icon-render-client";
 
 /**
  * Composer-level controls. Redesigned to match the Claude Code message bar:
@@ -28,7 +29,6 @@ export function ModelPicker() {
     <span
       className="oc-composer-tool-label"
       title={`Model: ${current.label} · ${current.description}`}
-      aria-label={`Using ${current.label}`}
     >
       {current.label}
     </span>
@@ -51,11 +51,12 @@ export function ThinkingToggle() {
   const model = MODEL_BY_ID[settings.modelId];
   const disabled = !model?.supportsThinking;
   const on = settings.thinking && !disabled;
+  const ThinkIcon = getIconComponent("IconBrain", on ? "filled" : "outlined");
 
   return (
     <button
       type="button"
-      className="oc-composer-tool"
+      className="oc-composer-tool oc-composer-tool--think"
       data-on={on || undefined}
       onClick={() => modelSettingsStore.setThinking(!on)}
       disabled={disabled}
@@ -67,33 +68,14 @@ export function ThinkingToggle() {
             : "Turn on extended thinking for harder problems"
       }
     >
-      <ThinkGlyph />
-      <span>Think {on ? "on" : "off"}</span>
+      {ThinkIcon
+        ? createElement(ThinkIcon, {
+            size: 16,
+            color: "currentColor",
+            ariaHidden: true,
+          })
+        : null}
+      <span className="oc-composer-tool-text">Think {on ? "on" : "off"}</span>
     </button>
-  );
-}
-
-function ThinkGlyph() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M8 2.5a4.5 4.5 0 0 0-2.4 8.3V12a1 1 0 0 0 1 1h2.8a1 1 0 0 0 1-1v-1.2A4.5 4.5 0 0 0 8 2.5Z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.5 14h3"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }
