@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getIconComponent } from "@/lib/icon-render-client";
 import {
   SandpackProvider,
   SandpackPreview,
@@ -131,7 +132,7 @@ export function PreviewPanel() {
         zIndex: 50,
         background: "var(--surface-1)",
       }}
-      aria-label="Preview panel"
+      aria-label="Simulator panel"
     >
       {!state.collapsed && <PreviewPanelResizer />}
       {!state.collapsed && <PreviewPanelCornerResizer />}
@@ -216,13 +217,13 @@ function Header({
       style={{ minHeight: 44 }}
     >
       <span
-        className="text-[13px] font-semibold"
+        className="pl-1.5 text-[13px] font-semibold"
         style={{
           color: "var(--text-primary)",
           letterSpacing: "-0.005em",
         }}
       >
-        Preview
+        Simulator
       </span>
       <span
         className="text-[11px] truncate"
@@ -243,31 +244,32 @@ function Header({
         aria-label="Hide preview"
         className="oc-preview-icon-btn"
       >
-        <CollapseIcon />
+        <HidePreviewIcon />
       </button>
     </header>
   );
 }
 
 /**
- * Single "100%" reset button. Clicking resets both the panel size and the
- * zoom mode: the panel snaps back to "wraps-device-at-100%" dimensions and
- * zoomMode flips to "actual". That way the button does what it says — you
- * always see the device at 1:1 with no clipping — instead of leaving a
- * too-small panel showing only a crop of the device.
+ * Full-screen icon — resets panel size and zoom so the device is at 1:1
+ * (zoomMode "actual"). Panel resize returns to "fit" automatically.
  */
+const ZoomResetIcon = getIconComponent("IconFullScreen", "outlined");
+
 function ZoomReset({ value }: { value: PreviewZoomMode }) {
   const isActual = value === "actual";
+  const I = ZoomResetIcon;
+  if (!I) return null;
   return (
     <button
       type="button"
-      className="oc-preview-reset"
+      className="oc-preview-icon-btn oc-preview-reset"
       data-active={isActual || undefined}
       onClick={() => previewPanelStore.resetSize()}
       title="Reset panel to 100% (device at actual size)"
       aria-label="Reset panel to 100% device size"
     >
-      100%
+      <I size={20} ariaHidden />
     </button>
   );
 }
@@ -517,11 +519,14 @@ function ScreenSandpack({
   void motionPresets; // subscribed so toMotionJs is fresh
   const theme: Theme = isDark ? "dark" : "light";
   const code = screen?.props.code ?? DEFAULT_SCREEN_CODE;
+  const routeParams: Record<string, string> = screen?.props.dataRecordId
+    ? { id: String(screen.props.dataRecordId) }
+    : {};
 
   // Key includes the screen id + device + token signature so the iframe
   // remounts when the user swaps device/screen or edits project tokens.
   // Without the token sig, Sandpack can keep a stale `tokens.css`.
-  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}:${designTokensSignature(tokens)}`;
+  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}:${screen?.props.dataEntityName ?? ""}:${screen?.props.dataRecordId ?? ""}:${designTokensSignature(tokens)}`;
 
   return (
     <SandpackProvider
@@ -530,7 +535,7 @@ function ScreenSandpack({
       theme={theme}
       files={{
         "/App.js": code,
-        "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme),
+        "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme, routeParams),
         "/tokens.css": buildTokensCss(tokens),
         "/motion.js": designMotionStore.toMotionJs(),
         "/routes.js": routesJs,
@@ -583,8 +588,8 @@ function ScreenSandpack({
 function PhoneIcon() {
   return (
     <svg
-      width="18"
-      height="18"
+      width="20"
+      height="20"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -599,22 +604,22 @@ function PhoneIcon() {
   );
 }
 
-function CollapseIcon() {
+/** `IconSidebarLeftArrow` points left; flip for “dismiss to the right” (hide). */
+const HidePreviewIconGlyph = getIconComponent(
+  "IconSidebarLeftArrow",
+  "outlined",
+);
+
+function HidePreviewIcon() {
+  if (!HidePreviewIconGlyph) return null;
+  const I = HidePreviewIconGlyph;
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+    <span
+      className="inline-flex"
+      style={{ transform: "scaleX(-1)" }}
       aria-hidden
     >
-      <path d="M13 6l6 6-6 6" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
+      <I size={20} ariaHidden />
+    </span>
   );
 }
-

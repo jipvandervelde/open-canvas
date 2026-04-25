@@ -30,6 +30,7 @@ import type { ScreenShape, ShapeId } from "@/lib/shape-types";
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
 const SCREEN_GAP = 40; // snap / auto-reposition buffer between shapes
+const ZOOM_STOPS = [0.05, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 5];
 
 type InteractionState =
   | { kind: "idle" }
@@ -479,11 +480,63 @@ export function OpenCanvas() {
 
   const selectedSet = new Set(selectedIds);
   const interaction = interactionRef.current;
+  const variantGroups = Array.from(
+    shapes.reduce((map, shape) => {
+      const groupId = shape.props.variantGroupId;
+      if (!groupId) return map;
+      const list = map.get(groupId) ?? [];
+      list.push(shape);
+      map.set(groupId, list);
+      return map;
+    }, new Map<string, ScreenShape[]>()),
+  )
+    .map(([id, group]) => {
+      if (group.length < 2) return null;
+      const pad = 14;
+      const minX = Math.min(...group.map((s) => s.x));
+      const minY = Math.min(...group.map((s) => s.y));
+      const maxX = Math.max(...group.map((s) => s.x + s.props.w));
+      const maxY = Math.max(...group.map((s) => s.y + s.props.h));
+      return {
+        id,
+        x: minX - pad,
+        y: minY - pad,
+        w: maxX - minX + pad * 2,
+        h: maxY - minY + pad * 2,
+      };
+    })
+    .filter((g): g is { id: string; x: number; y: number; w: number; h: number } => !!g);
+
+  function setZoomCentered(nextZ: number) {
+    const cam = canvasStore.getCamera();
+    const vp = canvasStore.getViewport();
+    const screenCx = vp.x + vp.w / 2;
+    const screenCy = vp.y + vp.h / 2;
+    const pageCx = screenCx / cam.z - cam.x;
+    const pageCy = screenCy / cam.z - cam.y;
+    const z = clamp(nextZ, MIN_ZOOM, MAX_ZOOM);
+    canvasStore.setCamera({
+      x: screenCx / z - pageCx,
+      y: screenCy / z - pageCy,
+      z,
+    });
+  }
+
+  function stepZoom(direction: -1 | 1) {
+    const current = camera.z;
+    const epsilon = 0.001;
+    const next =
+      direction > 0
+        ? ZOOM_STOPS.find((z) => z > current + epsilon) ?? ZOOM_STOPS[ZOOM_STOPS.length - 1]
+        : [...ZOOM_STOPS].reverse().find((z) => z < current - epsilon) ?? ZOOM_STOPS[0];
+    setZoomCentered(next);
+  }
 
   // Dot grid tracks the camera: background-size scales with zoom so the
   // grid spacing stays 24 world-units, and background-position is the camera
   // translation in screen space, so pan visibly shifts the dots.
   const dotSize = 24 * camera.z;
+  const gridOpacity = Math.max(0, Math.min(1, camera.z));
   return (
     <div
       ref={rootRef}
@@ -496,6 +549,7 @@ export function OpenCanvas() {
         overflow: "hidden",
         backgroundSize: `${dotSize}px ${dotSize}px`,
         backgroundPosition: `${camera.x * camera.z}px ${camera.y * camera.z}px`,
+        ["--oc-grid-opacity" as string]: gridOpacity,
         cursor:
           interaction.kind === "pan"
             ? "grabbing"
@@ -523,6 +577,37 @@ export function OpenCanvas() {
             willChange: "transform",
           }}
         >
+          {variantGroups.map((group) => (
+            <svg
+              key={group.id}
+              className="oc-variant-group-outline"
+              style={{
+                position: "absolute",
+                left: group.x,
+                top: group.y,
+                width: group.w,
+                height: group.h,
+              }}
+              aria-hidden="true"
+            >
+              <rect
+                x={3}
+                y={3}
+                width={Math.max(0, group.w - 6)}
+                height={Math.max(0, group.h - 6)}
+                rx={30}
+                ry={30}
+                fill="none"
+                stroke="var(--border-strong)"
+                strokeWidth={1.5}
+                strokeDasharray="4 12"
+                strokeDashoffset="10"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          ))}
           {shapes.map((s) => (
             <div
               key={s.id}
@@ -546,7 +631,7 @@ export function OpenCanvas() {
                     inset: 0,
                     pointerEvents: "none",
                     boxShadow: `0 0 0 ${1.5 / camera.z}px var(--accent-base)`,
-                    borderRadius: 12,
+                    borderRadius: "var(--chrome-panel-radius)",
                   }}
                 />
               )}
@@ -602,6 +687,48 @@ export function OpenCanvas() {
               />
             );
           })()}
+        <div
+          className="oc-zoom-control"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="oc-zoom-btn"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={() => stepZoom(-1)}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="oc-zoom-value oc-tabular"
+            aria-label="Set zoom to 100%"
+            title="Set zoom to 100%"
+            onClick={() => setZoomCentered(1)}
+          >
+            {Math.round(camera.z * 100)}%
+          </button>
+          <button
+            type="button"
+            className="oc-zoom-btn"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={() => stepZoom(1)}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="oc-zoom-fit"
+            aria-label="Fit canvas"
+            title="Fit canvas"
+            onClick={() => zoomToFitCapped(editor, { animation: { duration: 180 } })}
+          >
+            Fit
+          </button>
+        </div>
     </div>
   );
 }

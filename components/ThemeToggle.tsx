@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getIconComponent } from "@/lib/icon-render-client";
 import { themeStore, type Theme } from "@/lib/theme-store";
 
+const SunOutlined = getIconComponent("IconSun", "outlined");
+const SunFilled = getIconComponent("IconSun", "filled");
+const MoonOutlined = getIconComponent("IconMoon", "outlined");
+const MoonFilled = getIconComponent("IconMoon", "filled");
+
 /**
- * Two-state pill toggle for the app theme. Subscribes to the theme store so
- * external flips (e.g. from a shortcut or initial hydration) keep the UI
- * in sync.
+ * Figma-style rounded segmented control: light | dark, sliding surface on
+ * the active segment. Active side uses filled Central icons; inactive uses
+ * outlined. Subscribes to the theme store for external flips.
  */
 export function ThemeToggle() {
   const [theme, setThemeState] = useState<Theme>("light");
@@ -21,62 +27,49 @@ export function ThemeToggle() {
   if (!mounted) return null;
 
   const isDark = theme === "dark";
+  const Sun = !isDark ? SunFilled : SunOutlined;
+  const Moon = isDark ? MoonFilled : MoonOutlined;
 
   return (
-    <button
-      type="button"
-      onClick={() => themeStore.toggle()}
-      aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
-      title={`Switch to ${isDark ? "light" : "dark"} mode`}
-      className="oc-theme-toggle"
+    <div
+      className="oc-theme-seg"
+      role="group"
+      aria-label="Theme"
       data-theme={theme}
     >
-      <span className="oc-theme-toggle-track" aria-hidden="true">
-        <span className="oc-theme-toggle-thumb" />
-      </span>
-      <SunIcon />
-      <MoonIcon />
-    </button>
-  );
-}
-
-function SunIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 14 14"
-      fill="none"
-      aria-hidden="true"
-      className="oc-theme-icon oc-theme-icon-sun"
-    >
-      <circle cx="7" cy="7" r="2.4" stroke="currentColor" strokeWidth="1.3" />
-      <path
-        d="M7 1.5v1.6M7 10.9v1.6M1.5 7h1.6M10.9 7h1.6M2.7 2.7l1.15 1.15M10.15 10.15l1.15 1.15M2.7 11.3l1.15-1.15M10.15 3.85l1.15-1.15"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 14 14"
-      fill="none"
-      aria-hidden="true"
-      className="oc-theme-icon oc-theme-icon-moon"
-    >
-      <path
-        d="M11.5 8.5A4.5 4.5 0 015.5 2.5a5 5 0 106 6z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-    </svg>
+      <span className="oc-theme-seg-indicator" aria-hidden="true" />
+      <button
+        type="button"
+        className="oc-theme-seg-item"
+        aria-pressed={!isDark}
+        aria-label="Light mode"
+        onClick={() => themeStore.set("light")}
+      >
+        {Sun ? (
+          <Sun
+            size={16}
+            color="currentColor"
+            ariaHidden
+            className="oc-theme-seg-icon"
+          />
+        ) : null}
+      </button>
+      <button
+        type="button"
+        className="oc-theme-seg-item"
+        aria-pressed={isDark}
+        aria-label="Dark mode"
+        onClick={() => themeStore.set("dark")}
+      >
+        {Moon ? (
+          <Moon
+            size={16}
+            color="currentColor"
+            ariaHidden
+            className="oc-theme-seg-icon"
+          />
+        ) : null}
+      </button>
+    </div>
   );
 }

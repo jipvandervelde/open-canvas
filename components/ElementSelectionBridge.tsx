@@ -8,6 +8,7 @@ import {
 import { streamingStore } from "@/lib/streaming-store";
 import { screenErrorLog } from "@/lib/screen-error-log";
 import { routeTableStore } from "@/lib/route-table-store";
+import { designDataStore } from "@/lib/design-data-store";
 import { useEditorRef } from "@/lib/editor-context";
 import type { ScreenShape } from "@/components/ScreenShapeUtil";
 
@@ -31,6 +32,25 @@ export function ElementSelectionBridge() {
         if (!d.to || !editor) return;
         const route = routeTableStore.findByPath(d.to);
         if (!route) return;
+        const params = d.params ?? {};
+        if (params.id) {
+          const target = editor
+            .getCurrentPageShapes()
+            .find((s) => s.id === route.id) as ScreenShape | undefined;
+          const entity = target
+            ? designDataStore
+                .get()
+                .find((e) => target.props.code.includes(`./data/${e.name}`))
+            : null;
+          editor.updateShape({
+            id: route.id as ScreenShape["id"],
+            type: "screen",
+            props: {
+              dataRecordId: String(params.id),
+              ...(entity ? { dataEntityName: entity.name } : null),
+            },
+          });
+        }
         // Pan + select the target screen on the canvas.
         editor.select(route.id as ScreenShape["id"]);
         editor.zoomToSelection({ animation: { duration: 360 } });
@@ -38,7 +58,6 @@ export function ElementSelectionBridge() {
         // picks up the new value. Need a tiny delay — the iframe may have
         // been unmounted/remounted by selection state. We retry a couple of
         // times because Sandpack reloads asynchronously.
-        const params = d.params ?? {};
         const postParams = () => {
           const selector = `iframe[title="Sandpack Preview"]`;
           const iframes = document.querySelectorAll<HTMLIFrameElement>(selector);

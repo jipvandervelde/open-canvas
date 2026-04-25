@@ -10,6 +10,11 @@ export type ScreenShapeProps = {
   code: string;
   statusBarStyle: "light" | "dark";
   parentScreenId: string;
+  dataEntityName?: string;
+  dataRecordId?: string;
+  variantGroupId?: string;
+  variantName?: string;
+  variantRole?: "main" | "alt";
 };
 
 export type ScreenShape = {

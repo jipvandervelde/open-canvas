@@ -355,7 +355,7 @@ function searchProjectCodebase(
         });
       }
     }
-    for (const group of ["spacing", "radius", "fontSize"] as const) {
+    for (const group of ["spacing", "radius"] as const) {
       for (const t of tokens[group]) {
         if (
           t.name.toLowerCase().includes(q) ||
@@ -367,6 +367,19 @@ function searchProjectCodebase(
             excerpt: `value: ${t.value}`,
           });
         }
+      }
+    }
+    for (const t of tokens.typography) {
+      if (
+        t.name.toLowerCase().includes(q) ||
+        t.fontSize.toLowerCase().includes(q) ||
+        t.fontFamily.toLowerCase().includes(q)
+      ) {
+        matches.push({
+          source: "token",
+          location: `typography.${t.name}`,
+          excerpt: `size: ${t.fontSize} · weight: ${t.fontWeight}`,
+        });
       }
     }
   }
@@ -2062,6 +2075,7 @@ export function LeftPanel() {
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessage[]>(
     () => messageQueueStore.get(),
   );
+  const drainingQueueRef = useRef(false);
   useEffect(() => {
     setQueuedMessages(messageQueueStore.get());
     return messageQueueStore.subscribe(setQueuedMessages);
@@ -2161,12 +2175,17 @@ export function LeftPanel() {
   // queued message. This cleanly serializes user intents while leaving every
   // in-between tool call cycle free to finish.
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status !== "ready") {
+      drainingQueueRef.current = false;
+      return;
+    }
+    if (drainingQueueRef.current) return;
     const next = messageQueueStore.shift();
     if (!next) return;
+    drainingQueueRef.current = true;
     const canvasContext = buildAgentContext(editor);
     sendMessage({ text: next.text }, { body: { canvasContext } });
-  }, [status, sendMessage, editor]);
+  }, [status, queuedMessages.length, sendMessage, editor]);
 
   // Stop handler: cancels the streaming chat response AND aborts any
   // sub-agent fetches that the client kicked off via onToolCall. Keep the
@@ -2537,7 +2556,9 @@ export function LeftPanel() {
           </span>
           <ResetButton />
         </div>
-        <ThemeToggle />
+        <div className="shrink-0 translate-x-1.5">
+          <ThemeToggle />
+        </div>
       </header>
 
       <div

@@ -2,7 +2,97 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import CodeMirror, { EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { javascript } from "@codemirror/lang-javascript";
+
+const mutedCodeHighlight = HighlightStyle.define([
+  {
+    tag: [
+      tags.keyword,
+      tags.controlKeyword,
+      tags.moduleKeyword,
+      tags.operatorKeyword,
+    ],
+    color: "var(--code-token-keyword)",
+    fontWeight: "500",
+  },
+  {
+    tag: [
+      tags.string,
+      tags.regexp,
+      tags.escape,
+      tags.special(tags.string),
+    ],
+    color: "var(--code-token-string)",
+  },
+  {
+    tag: [
+      tags.number,
+      tags.atom,
+      tags.bool,
+      tags.null,
+      tags.unit,
+      tags.literal,
+    ],
+    color: "var(--code-token-literal)",
+  },
+  {
+    tag: [
+      tags.typeName,
+      tags.namespace,
+      tags.className,
+      tags.tagName,
+      tags.heading,
+    ],
+    color: "var(--code-token-type)",
+  },
+  {
+    tag: [
+      tags.function(tags.variableName),
+      tags.function(tags.propertyName),
+      tags.definition(tags.function(tags.variableName)),
+      tags.definition(tags.function(tags.propertyName)),
+    ],
+    color: "var(--code-token-function)",
+  },
+  {
+    tag: [
+      tags.propertyName,
+      tags.attributeName,
+      tags.labelName,
+      tags.definition(tags.propertyName),
+    ],
+    color: "var(--code-token-property)",
+  },
+  {
+    tag: [
+      tags.variableName,
+      tags.definition(tags.variableName),
+      tags.special(tags.variableName),
+      tags.macroName,
+    ],
+    color: "var(--code-token-base)",
+  },
+  {
+    tag: [tags.comment, tags.docComment, tags.lineComment, tags.blockComment],
+    color: "var(--code-token-comment)",
+    fontStyle: "italic",
+  },
+  {
+    tag: [tags.meta, tags.processingInstruction, tags.annotation],
+    color: "var(--code-token-muted)",
+  },
+  {
+    tag: [tags.punctuation, tags.bracket, tags.paren, tags.operator],
+    color: "var(--code-token-faint)",
+  },
+  {
+    tag: tags.invalid,
+    color: "var(--code-token-invalid)",
+    textDecoration: "none",
+  },
+]);
 
 /**
  * CodeMirror 6 editor styled to sit inside the Inspector as a native panel
@@ -37,6 +127,7 @@ export function CodeEditor({
   const extensions = useMemo(
     () => [
       javascript({ jsx: true, typescript: true }),
+      syntaxHighlighting(mutedCodeHighlight),
       EditorView.lineWrapping,
     ],
     [],
@@ -74,6 +165,7 @@ export function CodeEditor({
           foldGutter: false,
           highlightActiveLine: false,
           highlightActiveLineGutter: false,
+          syntaxHighlighting: false,
           indentOnInput: true,
           bracketMatching: true,
           closeBrackets: true,

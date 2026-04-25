@@ -75,11 +75,8 @@ export type DesignTokens = {
   typography: TypographyToken[];
 };
 
-// v4 — added `brand.secondary` decorative accent and retuned the state
-// palette (success/warning/error) to a single mode-invariant value each,
-// replacing the prior iOS-HIG light/dark pair. Bumping the key replaces
-// existing v3 data with fresh v4 defaults so the new values land cleanly.
-const STORAGE_KEY = "oc:design-tokens:v4";
+// v8 — action 17, headline 19, largeTitle 36. v7: type list + display rename.
+const STORAGE_KEY = "oc:design-tokens:v8";
 
 /**
  * Defaults chosen to read iOS-native out of the box. Light values match
@@ -242,11 +239,19 @@ const DEFAULTS: DesignTokens = {
     { id: "r_pill", name: "pill", value: "999px" },
   ],
   typography: [
-    // iOS HIG-derived text styles. System font stack everywhere; line-height
-    // tightens for display sizes and loosens for body — standard typographic
-    // rhythm. Letter spacing is near-0 for body, tightens for display.
-    // Font weights follow HIG: 400 body, 500 controls, 600 headlines, 700
-    // display.
+    // iOS HIG–aligned text styles, listed small → large. System font stack;
+    // line-height tightens for larger roles. Weights: 400 body, 500 controls,
+    // 600 title band, 700 large title.
+    {
+      id: "t_caption2",
+      name: "caption2",
+      fontFamily:
+        "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      fontSize: "9px",
+      fontWeight: 500,
+      lineHeight: "1.2",
+      letterSpacing: "0.02em",
+    },
     {
       id: "t_caption",
       name: "caption",
@@ -268,38 +273,48 @@ const DEFAULTS: DesignTokens = {
       letterSpacing: "0.005em",
     },
     {
-      id: "t_body",
-      name: "body",
-      fontFamily:
-        "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-      fontSize: "15px",
-      fontWeight: 400,
-      lineHeight: "1.47",
-      letterSpacing: "0",
-    },
-    {
       id: "t_callout",
       name: "callout",
       fontFamily:
         "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-      fontSize: "16px",
+      fontSize: "15px",
       fontWeight: 500,
       lineHeight: "1.4",
       letterSpacing: "-0.005em",
     },
     {
-      id: "t_title",
-      name: "title",
+      id: "t_body",
+      name: "body",
       fontFamily:
         "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-      fontSize: "20px",
+      fontSize: "16px",
+      fontWeight: 400,
+      lineHeight: "1.47",
+      letterSpacing: "0",
+    },
+    {
+      id: "t_action",
+      name: "action",
+      fontFamily:
+        "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      fontSize: "17px",
       fontWeight: 600,
-      lineHeight: "1.3",
+      lineHeight: "1.35",
       letterSpacing: "-0.01em",
     },
     {
       id: "t_headline",
       name: "headline",
+      fontFamily:
+        "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      fontSize: "19px",
+      fontWeight: 600,
+      lineHeight: "1.3",
+      letterSpacing: "-0.01em",
+    },
+    {
+      id: "t_title",
+      name: "title",
       fontFamily:
         "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
       fontSize: "24px",
@@ -308,11 +323,11 @@ const DEFAULTS: DesignTokens = {
       letterSpacing: "-0.015em",
     },
     {
-      id: "t_display",
-      name: "display",
+      id: "t_large_title",
+      name: "largeTitle",
       fontFamily:
         "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-      fontSize: "34px",
+      fontSize: "36px",
       fontWeight: 700,
       lineHeight: "1.15",
       letterSpacing: "-0.02em",

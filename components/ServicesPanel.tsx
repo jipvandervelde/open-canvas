@@ -102,35 +102,37 @@ export function ServicesPanel() {
       </aside>
       {selected ? (
         <section className="oc-components-edit">
-          <div className="oc-components-meta">
+          <div className="oc-components-chrome">
+            <div className="oc-components-meta">
+              <input
+                className="oc-tokens-name oc-components-name"
+                value={selected.name}
+                onChange={(e) =>
+                  updateSelected({
+                    name: e.target.value.replace(/[^A-Za-z0-9]/g, ""),
+                  })
+                }
+                spellCheck={false}
+                aria-label="Service name"
+              />
+              <button
+                type="button"
+                className="oc-components-remove"
+                onClick={removeSelected}
+                title="Remove service"
+              >
+                Remove
+              </button>
+            </div>
             <input
-              className="oc-tokens-name oc-components-name"
-              value={selected.name}
-              onChange={(e) =>
-                updateSelected({
-                  name: e.target.value.replace(/[^A-Za-z0-9]/g, ""),
-                })
-              }
+              className="oc-tokens-value oc-components-desc"
+              placeholder="One-line description (shown to the AI)"
+              value={selected.description}
+              onChange={(e) => updateSelected({ description: e.target.value })}
               spellCheck={false}
-              aria-label="Service name"
+              aria-label="Service description"
             />
-            <button
-              type="button"
-              className="oc-components-remove"
-              onClick={removeSelected}
-              title="Remove service"
-            >
-              Remove
-            </button>
           </div>
-          <input
-            className="oc-tokens-value oc-components-desc"
-            placeholder="One-line description (shown to the AI)"
-            value={selected.description}
-            onChange={(e) => updateSelected({ description: e.target.value })}
-            spellCheck={false}
-            aria-label="Service description"
-          />
           <div className="oc-components-code">
             <CodeEditor
               value={selected.code}

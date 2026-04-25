@@ -96,6 +96,10 @@ function StatusBar({
     return () => window.clearInterval(id);
   }, []);
 
+  const systemUi =
+    "ui-sans-serif, -apple-system, BlinkMacSystemFont, SF Pro Text, system-ui, sans-serif";
+  const assetTone = style === "light" ? undefined : "invert(1)";
+
   return (
     <div
       aria-hidden
@@ -106,16 +110,6 @@ function StatusBar({
         right: 0,
         height,
         pointerEvents: "none",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "space-between",
-        padding: "14px 24px 0",
-        color: ink,
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, SF Pro Text, system-ui, sans-serif",
-        fontSize: 15,
-        fontWeight: 600,
-        letterSpacing: -0.2,
         zIndex: 6,
         // Soft vertical fade so the status bar stays legible over hero
         // gradients; invisible over flat solid backgrounds.
@@ -125,24 +119,68 @@ function StatusBar({
             : "transparent",
       }}
     >
-      <span
-        style={{ fontVariantNumeric: "tabular-nums" }}
-        data-status-clock
-      >
-        {time}
-      </span>
-      {dynamicIsland && <DynamicIsland />}
       <div
         style={{
-          display: "flex",
+          position: "relative",
+          zIndex: 1,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
           alignItems: "center",
-          gap: 5,
+          minHeight: 44,
+          padding: "12px 20px 0",
+          color: ink,
         }}
       >
-        <SignalBars color={ink} />
-        <WifiIcon color={ink} />
-        <BatteryIcon color={ink} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minWidth: 0,
+            textAlign: "center",
+          }}
+        >
+          <span
+            data-status-clock
+            style={{
+              display: "inline-block",
+              fontFamily: systemUi,
+              fontSize: 15.5,
+              fontWeight: 600,
+              letterSpacing: -0.35,
+              fontVariantNumeric: "tabular-nums",
+              lineHeight: 1.2,
+            }}
+          >
+            {time}
+          </span>
+        </div>
+        <div aria-hidden style={{ minHeight: 1 }} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            minWidth: 0,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- static public asset, chrome asset */}
+          <img
+            src="/device-chrome/statusbar-right.svg"
+            width={100}
+            height={20}
+            alt=""
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              height: "auto",
+              objectFit: "contain",
+              filter: assetTone,
+            }}
+          />
+        </div>
       </div>
+      {dynamicIsland && <DynamicIsland />}
     </div>
   );
 }
@@ -154,9 +192,9 @@ function HomeIndicator({
   height: number;
   style: "light" | "dark";
 }) {
-  // The home indicator is a ~134×5 rounded bar centered 8px from the
-  // bottom. On iPad it's narrower and shorter.
-  const barColor = style === "light" ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.85)";
+  // Asset: `public/device-chrome/home-indicator.svg` — 144×5, centered
+  // horizontally with its bottom edge 8px from the device bottom (iOS HIG).
+  const assetTone = style === "light" ? undefined : "invert(1)";
   return (
     <div
       aria-hidden
@@ -174,12 +212,18 @@ function HomeIndicator({
         zIndex: 6,
       }}
     >
-      <div
+      {/* eslint-disable-next-line @next/next/no-img-element -- static public asset, chrome asset */}
+      <img
+        src="/device-chrome/home-indicator.svg"
+        width={144}
+        height={5}
+        alt=""
         style={{
-          width: 134,
+          display: "block",
+          maxWidth: "min(100%, 144px)",
+          width: 144,
           height: 5,
-          background: barColor,
-          borderRadius: 3,
+          filter: assetTone,
         }}
       />
     </div>
@@ -199,70 +243,9 @@ function DynamicIsland() {
         background: "#000",
         borderRadius: 20,
         pointerEvents: "none",
+        zIndex: 2,
       }}
     />
-  );
-}
-
-function SignalBars({ color }: { color: string }) {
-  return (
-    <svg width="18" height="12" viewBox="0 0 18 12" fill="none" aria-hidden>
-      {[3, 5, 7, 9].map((h, i) => (
-        <rect
-          key={i}
-          x={i * 4}
-          y={12 - h}
-          width="3"
-          height={h}
-          rx="0.8"
-          fill={color}
-        />
-      ))}
-    </svg>
-  );
-}
-
-function WifiIcon({ color }: { color: string }) {
-  return (
-    <svg width="18" height="12" viewBox="0 0 18 12" fill="none" aria-hidden>
-      <path
-        d="M9 11L10.7 9.1A2.4 2.4 0 0 0 7.3 9.1L9 11Z"
-        fill={color}
-      />
-      <path
-        d="M5.3 7.4C7.4 5.3 10.6 5.3 12.7 7.4"
-        stroke={color}
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M2.6 4.7C6.2 1.1 11.8 1.1 15.4 4.7"
-        stroke={color}
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-function BatteryIcon({ color }: { color: string }) {
-  return (
-    <svg width="26" height="12" viewBox="0 0 26 12" fill="none" aria-hidden>
-      <rect
-        x="0.5"
-        y="0.5"
-        width="22"
-        height="11"
-        rx="2.5"
-        stroke={color}
-        strokeOpacity="0.4"
-        fill="none"
-      />
-      <rect x="23" y="4" width="1.8" height="4" rx="0.6" fill={color} opacity="0.4" />
-      <rect x="2" y="2" width="18" height="8" rx="1.4" fill={color} />
-    </svg>
   );
 }
 

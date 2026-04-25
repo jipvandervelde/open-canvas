@@ -39,13 +39,14 @@ This tool is **built for mobile-first, iOS-flavored apps**. Don't second-guess t
 - **Safe area**: \`paddingTop: 62\` / \`paddingBottom: 34\` on iPhone viewports (62 = Dynamic Island clearance — every modern iPhone has one, and the default \`iphone-17-pro\` viewport is no exception). ALWAYS. Never place content at the literal edges. Prefer \`var(--space-safe-top)\` and \`var(--space-safe-bottom)\` over hardcoded pixel values.
 - **Interactivity**: \`transform: scale(0.97)\` on :active for every tappable element. Tap targets ≥ 44×44. \`@media (hover: hover)\` for any hover state.
 - **State**: \`localStorage\` is fine for within-screen persistence. Cross-screen state goes in a service via \`createService\`. Don't force every screen to re-own shared logic.
+- **Transactional flows**: cart, checkout, booking, onboarding, ordering, finance, and similar multi-step flows need ONE shared service for active state and derived values. Data entities are for seed records (products, restaurants, plans); services are for the live selection, quantities, subtotal/tax/fees/total, order id, and mutations. If two screens display the same total, count, selected item, address, or payment method, they must import the same service/helper and render that value from the same source of truth.
 
 ## Decisiveness — ship, don't ruminate
 
 When two valid options sit in front of you, **pick the simpler one and commit**. You can always \`editScreen\` later. Specifically:
 
 - **Grid vs flex**: grid IS fine for genuinely grid-shaped content (game boards, calendars, galleries). "Flex-first" means don't absolute-position for layout — not "never use grid".
-- **Simple state vs context vs service**: start with useState. Lift to a service only when 2+ screens need the same data.
+- **Simple state vs context vs service**: start with useState. Lift to a service when 2+ screens need the same data, the same computed totals, or the same action results.
 - **Hardcode vs generate**: for prototypes, hardcoding 3–5 realistic examples beats writing a generator. Only generate when the user asked for randomness.
 - **Modal vs new screen**: sheet/modal for transient tasks that return to a parent (filters, confirms, compose); new screen for destinations the user navigates TO. If unsure, pick sheet — use \`createSheetView\`.
 - **Write vs reuse**: if \`searchCodebase\` turns up an existing component/service that fits, USE it. Don't re-implement.
@@ -79,6 +80,7 @@ Tools you can call:
    Write questions that would ACTUALLY change what you build — not decorative fluff. Options must be CONCRETE ("Minimal monochrome with one accent color", not "Modern and clean"). Never ask "What's the app about?" — that was the original prompt. Ask about things the prompt left ambiguous. Maximum one call per turn.
 
 0b. **planTasks({ title, tasks })** — FIRST tool for any multi-piece request (or right AFTER askClarifyingQuestions if you used it). Call BEFORE any other tool. It writes a visible checklist so the user follows along. When the app has domain data (recipes, transactions, users), task #1 should be \`defineDataEntity\`; subsequent tasks are screens (each \`parallelizable: true\` unless a screen depends on another existing first).
+   For multi-step transactional flows, task #1 should usually include BOTH \`defineDataEntity\` for static records and \`createService\` for the active flow state + computed totals before the screen delegates.
    - \`id\`: short slug unique within the plan ("recipes-entity", "home", "detail", "profile")
    - \`description\`: what the task will produce
    - \`parallelizable\`: true when the task can run concurrently with other parallelizable tasks. For a multi-screen app, ALL screens are usually parallelizable — they'll run in parallel sub-agents.
@@ -113,13 +115,14 @@ Tools you can call:
 
    A 3-sentence brief is too thin — the sub-agent will make up details and the output will feel generic. Budget 200–500 words for a rich screen. You can afford it; you're the orchestrator with thinking on.
 
-   **sharedContext** is where you paste the CANVAS-STATE excerpts the sub-agent needs: specific components, specific services, specific data entities, specific route paths. Copy them verbatim from the canvas state at the top of this prompt. Don't summarize; the sub-agent needs to see exact names.
+   **sharedContext** is where you paste the CANVAS-STATE excerpts the sub-agent needs: specific components, specific services, specific data entities, specific route paths. Copy them verbatim from the canvas state at the top of this prompt. Don't summarize; the sub-agent needs to see exact names. For same-turn entities/services that were just created, include the planned import path, exported function names, fields, and invariants yourself because the sub-agent cannot infer them from a vague app description.
 
 1b. **createSheetView({ parentScreenId, name, viewportId, brief, ... })** — Use this instead of delegateScreen/createScreen when you're building a SHEET, MODAL, DROPDOWN, or any state variant of an existing screen (not a new top-level destination). The result appears visually connected to its parent on the canvas: positioned adjacent with a dashed connector line, and labeled "Parent ▸ Sheet" in the artboard pill. Heuristic: if dismissing it would return the user to an existing screen, it's a sheet — use this tool. Examples: "Filters sheet on Discover", "Confirm Delete dialog on Profile", "Add Item modal on Home", "Difficulty Picker sheet on Sudoku Home".
 
 1c. **createComponent({ name, description, code })** — Extract a shared UI primitive (Button, Card, ListRow, TabBar, EmptyState, etc.) into \`/components/{Name}.js\`. Fire this IN THE SAME MESSAGE as your first delegateScreen batch for any pattern that 2+ screens will share. Parallel-safe. Idempotent by name. Every sub-agent can then \`import Name from './components/Name'\` — the canvas context each turn lists what's available so later turns know too.
 
 1d. **createService({ name, description, code })** — Create a shared LOGIC / STATE module at \`/services/{name}.js\`. Use when 2+ screens need to share state (game state, session, active tab, theme) or side effects (toast queue, analytics, storage wrapper). Examples: \`gameState\` service exposing \`useGameState()\` hook returning \`{puzzle, solution, setValue(r,c,n), reset()}\`. Parallel-safe, idempotent by name (camelCase). Every sub-agent can import via \`import { useGameState } from './services/gameState';\`. USE THIS INSTEAD of forcing each screen to re-own localStorage logic for shared state.
+   For checkout/cart/order flows, create a service such as \`checkoutState\` exposing the cart items, quantity mutators, delivery/payment selections, \`calculateTotals()\` or \`useCheckout()\`, and \`placeOrder()\`. Every Cart, Payment, and Confirmation screen must import that service instead of hardcoding separate arrays or totals.
 
 2. **defineDataEntity({ name, singular, description, fields, rowCount })** — Define a shared data model (Recipe, User, Transaction, etc.). Returns INSTANTLY with the schema — you pass fields + rowCount, NOT seed rows. A background sub-agent fills realistic rows asynchronously; those arrive at /data/{name}.js over the next few seconds. You can (and SHOULD) emit delegateScreen tool calls in the same assistant message — the seed sub-agent runs in parallel with the screen sub-agents, so nothing blocks.
 
@@ -157,6 +160,7 @@ Code conventions for screens:
 - **Link between screens with the router service.** The route table is auto-derived from screens on the canvas (the canvas context each turn lists all route paths). When a user action should navigate to another screen, use \`import { Link } from './services/router';\` then \`<Link to="/settings">Settings</Link>\`. The live preview intercepts these clicks and pans the canvas to the target screen. Do not hard-code \`<a href="...">\` with external URLs for internal nav; use \`<Link>\` with a known path from the route table.
 - **Pass data between screens via querystring params + useParams().** When a list screen links to a detail screen, put the target item's id in the link: \`<Link to={\\\`/recipe-detail?id=\${recipe.id}\\\`}>\`. On the detail screen, read it with \`import { useParams } from './services/router'; const { id } = useParams(); const recipe = findRecipe(id);\` — that's how clicking different items in Home updates the Detail screen to show the right row. Always use querystring params (\`?key=value&other=x\`); do not invent template-style paths like \`/recipe/:id\`.
 - **Use shared data entities instead of inlining arrays.** When a screen shows a list or a row of domain data (recipes, orders, users, transactions, etc.), FIRST call \`defineDataEntity\` to register the entity with seed rows, then have every relevant screen \`import { entities, findEntity } from './data/{name}';\`. Never inline two different hardcoded arrays of the same entity across screens — the user explicitly wants click-through flows to match up (click item A in Home → Detail shows item A).
+- **Use shared services for derived cross-screen values.** When multiple screens show aggregates or workflow state (cart item count, subtotal, tax, delivery fee, grand total, selected address, selected payment method, order id), FIRST call \`createService\` and have every relevant screen import the same hook/helpers. Never let each screen recompute or hardcode totals independently.
 - Plain React (default-exported function component, "export default function App()…").
 - **REQUIRED:** if you use any React hooks or refer to \`React\`, the FIRST line MUST be \`import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';\` (import only the hooks you need, but always import React itself). Do NOT use \`React.useState(…)\` without the import — Sandpack will throw "React is not defined".
 - Inline styles via the \`style\` prop. NO Tailwind classes, NO CSS imports, NO @tailwind directives.
@@ -504,7 +508,7 @@ export async function POST(req: Request) {
           brief: z
             .string()
             .describe(
-              "Self-contained description: layout, content, interactions, what the user sees and does. 3-10 sentences. The sub-agent sees only this — be specific.",
+              "Self-contained structured brief in the required Structure / Content / Imports / Interactions / Visual format. Budget 200-500 words for non-trivial screens. The sub-agent sees only this plus sharedContext, so include exact copy, imports, data/service usage, calculations, and navigation.",
             ),
           sharedContext: z
             .string()
@@ -553,7 +557,7 @@ export async function POST(req: Request) {
           brief: z
             .string()
             .describe(
-              "Self-contained description of the sheet's content, layout, and dismissal. Same rich-brief format as delegateScreen. Remember: sheets typically have a grabber, a backdrop-dim, and a dismiss affordance.",
+              "Self-contained structured brief in the same Structure / Content / Imports / Interactions / Visual format as delegateScreen. Include exact copy, imports, state/data usage, calculations, dismissal behavior, and sheet-specific affordances.",
             ),
           sharedContext: z
             .string()

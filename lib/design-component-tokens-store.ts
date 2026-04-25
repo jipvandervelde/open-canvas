@@ -27,6 +27,12 @@
  *     to CSS-variable references.
  *   - A literal CSS value: `16px`, `#1A1C1E`, `0 2px 4px rgba(0,0,0,0.1)`.
  *   - A `var(--…)` expression for advanced cases the schema can't model.
+ *
+ * **`extra` after `typography`:** `resolveComponentTokens` applies `typography`
+ * first (all five `font-*` props from the role), then merges `extra`. Any
+ * key in `extra` overwrites the same key (e.g. `fontWeight` with any
+ * `var(--font-*-weight)`). Use a second token entry or component state branch
+ * (e.g. `text-field` + `text-field-filled`) for empty vs filled weight.
  */
 
 import type { DesignTokens } from "@/lib/design-tokens-store";
@@ -44,20 +50,16 @@ export type ComponentTokenProps = {
   size?: string;
   height?: string;
   width?: string;
-  /** Arbitrary extra props the agent or user may need — treated as
-   *  literal CSS values at emit time. Keep this small; first-class
-   *  props above should cover 95% of cases. */
+  /** Merged after `typography` — overrides any of the same properties,
+   *  e.g. `fontWeight` for a different weight than the type role. */
   extra?: Record<string, string>;
 };
 
 export type ComponentTokens = Record<string, ComponentTokenProps>;
 
-// v3 — Button disabled tokens (primary/secondary/ghost) now use
-// fg-tertiary as the surface and fg-secondary as the ink for the
-// classic iOS muted-grey treatment, replacing the old opacity-only
-// dimming. Ghost stays transparent and only mutes its ink. v2 added
-// the semibold weight overrides; older context in git history.
-const STORAGE_KEY = "oc:design-component-tokens:v3";
+// v15 — TextField placeholder: fg-tertiary at 50% (color-mix). v14: body
+// + filled.
+const STORAGE_KEY = "oc:design-component-tokens:v15";
 
 /** Seeded defaults. Every key and variant the in-house React components
  *  look up. Edit these in the Design panel (future) or via
@@ -69,50 +71,41 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
     textColor: "{colors.white}",
     rounded: "{radius.md}",
     padding: "0 var(--space-lg)",
-    typography: "{typography.body}",
+    typography: "{typography.action}",
     height: "44px",
-    // iOS system buttons run semibold (600) — overrides the body
-    // typography ref's weight (400). Inherited by spread state vars.
-    extra: { fontWeight: "600" },
   },
   "button-primary-pressed": {
     backgroundColor: "{colors.brand}",
     textColor: "{colors.white}",
   },
-  // Disabled state — fg-tertiary as the surface, fg-secondary as the
-  // ink. iOS uses the muted grey ramp regardless of variant, so the
-  // disabled affordance reads consistently across primary / secondary
-  // / ghost. The Button component drops its opacity dimming when
-  // disabled so these tokens are the signal.
+  // Disabled fill is bg-tertiary (surface ramp), not fg-tertiary.
   "button-primary-disabled": {
-    backgroundColor: "{colors.fg-tertiary}",
+    backgroundColor: "{colors.bg-tertiary}",
     textColor: "{colors.fg-secondary}",
   },
   "button-secondary": {
-    backgroundColor: "{colors.bg-secondary}",
+    backgroundColor: "{colors.fg-tertiary}",
     textColor: "{colors.fg-primary}",
     rounded: "{radius.md}",
     padding: "0 var(--space-lg)",
-    typography: "{typography.body}",
+    typography: "{typography.action}",
     height: "44px",
-    extra: { fontWeight: "600" },
   },
   "button-secondary-pressed": {
     backgroundColor: "{colors.bg-tertiary}",
     textColor: "{colors.fg-primary}",
   },
   "button-secondary-disabled": {
-    backgroundColor: "{colors.fg-tertiary}",
-    textColor: "{colors.fg-secondary}",
+    backgroundColor: "{colors.bg-tertiary}",
+    textColor: "{colors.fg-tertiary}",
   },
   "button-ghost": {
     backgroundColor: "transparent",
     textColor: "{colors.brand}",
     rounded: "{radius.md}",
     padding: "0 var(--space-lg)",
-    typography: "{typography.body}",
+    typography: "{typography.action}",
     height: "44px",
-    extra: { fontWeight: "600" },
   },
   "button-ghost-pressed": {
     backgroundColor: "{colors.bg-secondary}",
@@ -143,13 +136,22 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
     rounded: "{radius.md}",
     padding: "0 var(--space-md)",
     height: "44px",
-    // 16px minimum on mobile to prevent iOS zoom-on-focus; override
-    // with a literal instead of typography.body so it stays locked.
-    extra: { fontSize: "16px" },
+    // `body` = 16px/400: primary text + meets iOS no-zoom. Filled →
+    // `text-field-filled` (`--font-callout-weight` = 500) merged in
+    // component code.
+    typography: "{typography.body}",
+  },
+  "text-field-filled": {
+    extra: { fontWeight: "var(--font-callout-weight)" },
   },
   "text-field-label": {
     textColor: "{colors.fg-secondary}",
     typography: "{typography.footnote}",
+    padding: "0 4px",
+  },
+  "text-field-placeholder": {
+    textColor:
+      "color-mix(in oklch, var(--color-fg-tertiary) 50%, transparent)",
   },
   "text-field-focus-ring": {
     // 2px inset brand ring on focus. Emitted as `boxShadow`.
@@ -169,7 +171,7 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
 
   // ── Switch (iOS toggle) ─────────────────────────────────────────────
   "switch-track-off": {
-    backgroundColor: "{colors.fg-tertiary}",
+    backgroundColor: "{colors.bg-tertiary}",
     width: "51px",
     height: "31px",
     rounded: "999px",
@@ -182,8 +184,8 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
   },
   "switch-thumb": {
     backgroundColor: "{colors.white}",
-    width: "27px",
-    height: "27px",
+    width: "25px",
+    height: "25px",
     rounded: "50%",
     extra: {
       boxShadow:
@@ -193,48 +195,48 @@ export const COMPONENT_TOKENS_DEFAULT: ComponentTokens = {
 
   // ── SegmentedControl ────────────────────────────────────────────────
   "segmented-control": {
-    backgroundColor: "{colors.fg-tertiary}",
-    rounded: "{radius.md}",
+    backgroundColor: "{colors.bg-tertiary}",
+    rounded: "{radius.pill}",
     padding: "2px",
   },
   "segmented-control-pill": {
     backgroundColor: "{colors.bg-primary}",
-    rounded: "calc(var(--radius-md) - 2px)",
+    rounded: "calc(var(--radius-pill) - 2px)",
     extra: {
       boxShadow:
         "0 1px 2px rgba(0,0,0,0.04), 0 3px 8px -2px rgba(0,0,0,0.10)",
     },
   },
-  // Segmented-control labels run heavier than body text — iOS uses
-  // semibold (600) so the segments read as control affordances, not
-  // running prose. Same weight on active + inactive (no layout shift
-  // on selection); only color changes.
+  // Segmented-control labels use body size + semibold (600) so the
+  // segments read as control affordances. Same weight on active +
+  // inactive (no layout shift on selection); only color changes.
   "segmented-control-label-active": {
     textColor: "{colors.fg-primary}",
-    typography: "{typography.footnote}",
-    extra: { fontWeight: "600" },
+    typography: "{typography.body}",
+    extra: { fontWeight: "var(--font-title-weight)" },
   },
   "segmented-control-label-inactive": {
     textColor: "{colors.fg-secondary}",
-    typography: "{typography.footnote}",
-    extra: { fontWeight: "600" },
+    typography: "{typography.body}",
+    extra: { fontWeight: "var(--font-title-weight)" },
   },
 
   // ── Tab bar ─────────────────────────────────────────────────────────
   "tab-bar": {
-    backgroundColor: "{colors.bg-secondary}",
+    backgroundColor: "{colors.bg-primary}",
     height: "83px",
   },
-  // Tab-bar item labels run semibold (600) — same weight on active and
-  // inactive so the selection swap is a pure color change with no
-  // reflow. Inherited by the inner <span> via CSS cascade.
+  // Tab bar labels: `caption2` (9px) + title-weight (600). Same on active +
+  // inactive so only color flips. Child label inherits the button’s font.
   "tab-item-active": {
     textColor: "{colors.brand}",
-    extra: { fontWeight: "600" },
+    typography: "{typography.caption2}",
+    extra: { fontWeight: "var(--font-title-weight)" },
   },
   "tab-item-inactive": {
     textColor: "{colors.fg-secondary}",
-    extra: { fontWeight: "600" },
+    typography: "{typography.caption2}",
+    extra: { fontWeight: "var(--font-title-weight)" },
   },
 
   // ── Focus ring (shared) ─────────────────────────────────────────────
@@ -440,6 +442,8 @@ export function resolveComponentTokens(
       if (resolved != null) style[k] = resolved;
     }
   }
+  // `extra` is intentionally last so `fontWeight` / etc. can override
+  // the five properties expanded from `typography` above.
 
   return style as React.CSSProperties;
 }

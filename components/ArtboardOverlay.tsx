@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useValue } from "@/lib/canvas-store";
+import { canvasStore, createShapeId, useValue } from "@/lib/canvas-store";
 import { useEditorRef } from "@/lib/editor-context";
 import {
   VIEWPORT_PRESETS,
@@ -18,7 +18,14 @@ import {
   type ScreenErrorEntry,
 } from "@/lib/screen-error-log";
 import { screenResetStore } from "@/lib/screen-reset-store";
+import {
+  designDataStore,
+  type DataEntity,
+} from "@/lib/design-data-store";
+import { messageQueueStore } from "@/lib/message-queue-store";
 import type { ScreenShape } from "@/components/ScreenShapeUtil";
+
+const VARIANT_STACK_GAP = 80;
 
 type PillData = {
   id: string;
@@ -31,6 +38,12 @@ type PillData = {
   zoom: number;
   isSelected: boolean;
   parentScreenId: string; // "" when top-level
+  code: string;
+  dataEntityName: string;
+  dataRecordId: string;
+  variantGroupId: string;
+  variantName: string;
+  variantRole: "main" | "alt" | "";
 };
 
 export function ArtboardOverlay() {
@@ -42,6 +55,12 @@ export function ArtboardOverlay() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>("");
   const [errorPopoverFor, setErrorPopoverFor] = useState<string | null>(null);
+  const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
+  const [variantPromptFor, setVariantPromptFor] = useState<string | null>(null);
+  const [variantPromptDraft, setVariantPromptDraft] = useState<string>("");
+  const [dataEntities, setDataEntities] = useState<DataEntity[]>(() =>
+    designDataStore.get(),
+  );
   const [errorLogs, setErrorLogs] = useState<
     Map<string, ScreenErrorEntry[]>
   >(new Map());
@@ -60,6 +79,26 @@ export function ArtboardOverlay() {
     setCompileStatuses(screenStatusStore.getAll());
     return screenStatusStore.subscribeAll(setCompileStatuses);
   }, []);
+
+  useEffect(() => designDataStore.subscribe(setDataEntities), []);
+
+  useEffect(() => {
+    if (!openMenuFor) return;
+    function closeMenu() {
+      setOpenMenuFor(null);
+      setVariantPromptFor(null);
+      setVariantPromptDraft("");
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeMenu();
+    }
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenuFor]);
 
   const pills = useValue<PillData[]>(
     "artboard-pills",
@@ -89,6 +128,12 @@ export function ArtboardOverlay() {
           zoom: camera.z,
           isSelected: selectedIds.has(s.id),
           parentScreenId: s.props.parentScreenId ?? "",
+          code: s.props.code,
+          dataEntityName: s.props.dataEntityName ?? "",
+          dataRecordId: s.props.dataRecordId ?? "",
+          variantGroupId: s.props.variantGroupId ?? "",
+          variantName: s.props.variantName ?? "",
+          variantRole: s.props.variantRole ?? "",
         };
       });
     },
@@ -109,6 +154,153 @@ export function ArtboardOverlay() {
       w: v.width,
       h: v.height,
     });
+  }
+
+  function loadableEntityFor(p: PillData): DataEntity | null {
+    if (p.dataEntityName) {
+      return dataEntities.find((e) => e.name === p.dataEntityName) ?? null;
+    }
+    return (
+      dataEntities.find((entity) => {
+        const importsEntity =
+          p.code.includes(`./data/${entity.name}`) ||
+          p.code.includes(`'/data/${entity.name}'`) ||
+          p.code.includes(`"/data/${entity.name}"`);
+        if (!importsEntity) return false;
+        return (
+          p.code.includes(`find${entity.singular}`) ||
+          p.code.includes("useParams") ||
+          /\.\s*find\s*\(/.test(p.code)
+        );
+      }) ?? null
+    );
+  }
+
+  function selectDataRecord(p: PillData, entity: DataEntity, row: Record<string, unknown>) {
+    const rawId = row.id ?? row.slug ?? row.key;
+    if (rawId == null) return;
+    updateScreen(p.id, {
+      dataEntityName: entity.name,
+      dataRecordId: String(rawId),
+    });
+    setOpenMenuFor(null);
+  }
+
+  function resetScreenState(id: string) {
+    screenResetStore.bump(id);
+    setOpenMenuFor(null);
+  }
+
+  function deleteScreen(p: PillData) {
+    const groupId = p.variantGroupId;
+    const wasMain = p.variantRole === "main";
+    editor?.deleteShapes([p.id as ScreenShape["id"]]);
+    if (groupId && wasMain) {
+      const nextMain = canvasStore
+        .getAllShapes()
+        .filter((s) => s.id !== p.id && s.props.variantGroupId === groupId)
+        .sort((a, b) =>
+          (a.props.variantName ?? "").localeCompare(b.props.variantName ?? ""),
+        )[0];
+      if (nextMain) {
+        canvasStore.updateShape(
+          { id: nextMain.id, props: { variantRole: "main" } },
+          "user",
+        );
+      }
+    }
+    setOpenMenuFor(null);
+  }
+
+  function createVariant(p: PillData, brief: string) {
+    const all = canvasStore.getAllShapes();
+    const groupId = p.variantGroupId || p.id;
+    const group = all.filter((s) => (s.props.variantGroupId || s.id) === groupId);
+    const source = all.find((s) => s.id === p.id);
+    if (!source) return null;
+
+    const baseName = stripVariantSuffix(source.props.name);
+    const existingLabels = new Set(
+      group.map((s) => s.props.variantName).filter(Boolean) as string[],
+    );
+    if (!p.variantGroupId) existingLabels.add("A");
+    const nextLabel = nextVariantLabel(existingLabels);
+    const stack = group.length > 0 ? group : [source];
+    const minX = Math.min(...stack.map((s) => s.x));
+    const nextY =
+      Math.max(...stack.map((s) => s.y + s.props.h)) + VARIANT_STACK_GAP;
+
+    if (!source.props.variantGroupId) {
+      canvasStore.updateShape(
+        {
+          id: source.id,
+          props: {
+            name: `${baseName} [A]`,
+            variantGroupId: groupId,
+            variantName: "A",
+            variantRole: "main",
+          },
+        },
+        "user",
+      );
+    }
+
+    const id = createShapeId();
+    canvasStore.addShape(
+      {
+        id,
+        type: "screen",
+        x: minX,
+        y: nextY,
+        props: {
+          ...source.props,
+          name: `${baseName} [${nextLabel}]`,
+          variantGroupId: groupId,
+          variantName: nextLabel,
+          variantRole: "alt",
+          parentScreenId: source.props.parentScreenId ?? "",
+        },
+      },
+      "user",
+    );
+    canvasStore.select(id);
+    setOpenMenuFor(null);
+    setVariantPromptFor(null);
+    setVariantPromptDraft("");
+    messageQueueStore.enqueue(buildVariantPrompt(source, id, `${baseName} [${nextLabel}]`, brief));
+    return id;
+  }
+
+  function setMainVariant(p: PillData) {
+    if (!p.variantGroupId) return;
+    const group = canvasStore
+      .getAllShapes()
+      .filter((s) => s.props.variantGroupId === p.variantGroupId)
+      .sort((a, b) =>
+        (a.props.variantName ?? "").localeCompare(b.props.variantName ?? ""),
+      );
+    const selected = group.find((s) => s.id === p.id);
+    if (!selected) return;
+    const anchorX = Math.min(...group.map((s) => s.x));
+    const anchorY = Math.min(...group.map((s) => s.y));
+    let y = anchorY;
+    const ordered = [selected, ...group.filter((s) => s.id !== selected.id)];
+    canvasStore.updateShapes(
+      ordered.map((shape, index) => {
+        const patch = {
+          id: shape.id,
+          x: anchorX,
+          y,
+          props: {
+            variantRole: index === 0 ? ("main" as const) : ("alt" as const),
+          },
+        };
+        y += shape.props.h + VARIANT_STACK_GAP;
+        return patch;
+      }),
+      "user",
+    );
+    setOpenMenuFor(null);
   }
 
   const streamingByScreenId = new Map<string, StreamingMarker>();
@@ -137,7 +329,6 @@ export function ArtboardOverlay() {
     if (!parent) continue;
     sheetLinks.push({ id: p.id + "-link", parent, child: p });
   }
-
   return (
     <div
       data-agentation-ignore
@@ -210,6 +401,11 @@ export function ArtboardOverlay() {
         const isStreaming = streamingByScreenId.has(p.id);
         const showErrorBadge =
           !isStreaming && compileStatus?.kind === "error";
+        const loadableEntity = loadableEntityFor(p);
+        const loadableRows =
+          loadableEntity?.seeds.filter((row) => row.id ?? row.slug ?? row.key) ??
+          [];
+        const canLoadData = !!loadableEntity && loadableRows.length > 1;
         return (
           <div
             key={p.id}
@@ -217,13 +413,15 @@ export function ArtboardOverlay() {
               position: "absolute",
               left: p.x,
               top: p.y - 36,
-              maxWidth: p.w,
+              width: p.w,
               display: "flex",
+              justifyContent: "space-between",
               gap: 10,
               alignItems: "center",
               pointerEvents: "auto",
             }}
           >
+            <div className="oc-artboard-left-actions">
             {renamingId === p.id ? (
               <input
                 autoFocus
@@ -293,6 +491,16 @@ export function ArtboardOverlay() {
                   </>
                 )}
                 {p.name}
+                {p.variantRole === "main" && (
+                  <span className="oc-pill-badge" aria-hidden>
+                    main
+                  </span>
+                )}
+                {p.variantRole === "alt" && (
+                  <span className="oc-pill-badge" aria-hidden>
+                    alt
+                  </span>
+                )}
                 {p.parentScreenId && (
                   <span className="oc-pill-badge" aria-hidden>
                     sheet
@@ -300,67 +508,6 @@ export function ArtboardOverlay() {
                 )}
               </button>
             )}
-            <label className="oc-viewport-chooser" title="Change viewport">
-              <span className="oc-viewport-chooser-label oc-tabular">
-                {viewport?.label ?? p.viewportId}
-              </span>
-              <svg
-                className="oc-viewport-chooser-caret"
-                viewBox="0 0 12 12"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <select
-                value={p.viewportId}
-                onChange={(e) =>
-                  applyViewport(p.id, e.target.value as ViewportPresetId)
-                }
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                aria-label="Change viewport"
-              >
-                {VIEWPORT_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="oc-pill oc-pill--icon"
-              title="Reset this screen's internal state (navigation, forms, counters). Does not change code."
-              aria-label="Reset screen state"
-              onClick={(e) => {
-                e.stopPropagation();
-                screenResetStore.bump(p.id);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.7 0 3.2.7 4.3 1.9M12.8 2v2.8H10"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
             {(showErrorBadge || (errorLogs.get(p.id)?.length ?? 0) > 0) && (
               <ErrorBadge
                 screenId={p.id}
@@ -377,6 +524,210 @@ export function ArtboardOverlay() {
                 onClose={() => setErrorPopoverFor(null)}
               />
             )}
+            </div>
+            <div
+              className="oc-artboard-menu-wrap"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="oc-pill oc-pill--icon oc-pill--menu"
+                title="Screen actions"
+                aria-label="Screen actions"
+                aria-haspopup="menu"
+                aria-expanded={openMenuFor === p.id}
+                onClick={() =>
+                  setOpenMenuFor((cur) => (cur === p.id ? null : p.id))
+                }
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle cx="4" cy="8" r="1.25" fill="currentColor" />
+                  <circle cx="8" cy="8" r="1.25" fill="currentColor" />
+                  <circle cx="12" cy="8" r="1.25" fill="currentColor" />
+                </svg>
+              </button>
+              {openMenuFor === p.id && (
+                <div className="oc-artboard-menu" role="menu">
+                  <div
+                    className="oc-artboard-menu-viewport"
+                    role="group"
+                    aria-label="Viewport"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <label
+                      className="oc-viewport-chooser oc-viewport-chooser--menu"
+                      title="Change viewport"
+                    >
+                      <span className="oc-viewport-chooser-label oc-tabular">
+                        {viewport?.label ?? p.viewportId}
+                      </span>
+                      <svg
+                        className="oc-viewport-chooser-caret"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3 4.5L6 7.5L9 4.5"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <select
+                        value={p.viewportId}
+                        onChange={(e) => {
+                          applyViewport(
+                            p.id,
+                            e.target.value as ViewportPresetId,
+                          );
+                          setOpenMenuFor(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        aria-label="Change viewport"
+                      >
+                        {VIEWPORT_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div
+                    className="oc-artboard-menu-separator"
+                    role="separator"
+                  />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="oc-artboard-menu-item"
+                    onClick={() => resetScreenState(p.id)}
+                  >
+                    Reset state
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="oc-artboard-menu-item"
+                    disabled={!canLoadData}
+                    onClick={() => {
+                      if (!loadableEntity) return;
+                      const nextRow =
+                        loadableRows.find((row) => {
+                          const id = String(row.id ?? row.slug ?? row.key);
+                          return id !== p.dataRecordId;
+                        }) ?? loadableRows[0];
+                      if (nextRow) selectDataRecord(p, loadableEntity, nextRow);
+                    }}
+                    title={
+                      canLoadData
+                        ? `Switch ${loadableEntity?.singular ?? "record"} preview data`
+                        : "Available on detail screens that import a data entity and read route params"
+                    }
+                  >
+                    Load different data entity
+                  </button>
+                  {canLoadData && loadableEntity && (
+                    <div className="oc-artboard-record-list">
+                      {loadableRows.slice(0, 8).map((row) => {
+                        const id = String(row.id ?? row.slug ?? row.key);
+                        const current = id === p.dataRecordId;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            role="menuitem"
+                            className="oc-artboard-record-item"
+                            disabled={current}
+                            onClick={() => selectDataRecord(p, loadableEntity, row)}
+                          >
+                            <span className="oc-artboard-record-name">
+                              {recordLabel(row)}
+                            </span>
+                            {current && (
+                              <span className="oc-artboard-record-current">
+                                current
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="oc-artboard-menu-item"
+                    onClick={() => {
+                      setVariantPromptFor((cur) => (cur === p.id ? null : p.id));
+                      setVariantPromptDraft("");
+                    }}
+                  >
+                    Create variants
+                  </button>
+                  {variantPromptFor === p.id && (
+                    <form
+                      className="oc-artboard-variant-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        createVariant(p, variantPromptDraft.trim());
+                      }}
+                    >
+                      <textarea
+                        autoFocus
+                        value={variantPromptDraft}
+                        onChange={(e) => setVariantPromptDraft(e.target.value)}
+                        placeholder="What should be different in this variant?"
+                        className="oc-artboard-variant-input"
+                        rows={3}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            createVariant(p, variantPromptDraft.trim());
+                          }
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="oc-artboard-variant-submit"
+                      >
+                        Create and send to agent
+                      </button>
+                    </form>
+                  )}
+                  {p.variantGroupId && p.variantRole !== "main" && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="oc-artboard-menu-item"
+                      onClick={() => setMainVariant(p)}
+                    >
+                      Set as main variant
+                    </button>
+                  )}
+                  <div className="oc-artboard-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="oc-artboard-menu-item oc-artboard-menu-item--danger"
+                    onClick={() => deleteScreen(p)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
             {/* Hint label for the currently-hovering viewport — swallowed to keep pill compact */}
             {viewport && null}
           </div>
@@ -384,6 +735,53 @@ export function ArtboardOverlay() {
       })}
     </div>
   );
+}
+
+function stripVariantSuffix(name: string): string {
+  return name.replace(/\s+\[[A-Z]+\]$/u, "").trim() || "Screen";
+}
+
+function nextVariantLabel(existing: Set<string>): string {
+  for (let i = 0; i < 26; i++) {
+    const label = String.fromCharCode(65 + i);
+    if (!existing.has(label)) return label;
+  }
+  return String(existing.size + 1);
+}
+
+function recordLabel(row: Record<string, unknown>): string {
+  const value =
+    row.title ??
+    row.name ??
+    row.label ??
+    row.displayName ??
+    row.id ??
+    row.slug ??
+    row.key;
+  return value == null ? "Untitled record" : String(value);
+}
+
+function buildVariantPrompt(
+  source: ScreenShape,
+  variantId: ScreenShape["id"],
+  variantName: string,
+  brief: string,
+): string {
+  const trimmedBrief =
+    brief ||
+    "Create a meaningful alternative layout and visual treatment while preserving the same screen purpose, data, and navigation contract.";
+  return [
+    `Create a screen variant for "${source.props.name}".`,
+    "",
+    `Source screen id: ${source.id}`,
+    `Variant screen id to update: ${variantId}`,
+    `Variant name: ${variantName}`,
+    "",
+    "The variant screen has already been created on the canvas as a clone. Use updateScreen on the variant screen id only. Do not create another screen.",
+    "Preserve the same product intent, viewport, shared data imports, route behavior, and core user task unless the brief explicitly asks to change them.",
+    "",
+    `Variant brief: ${trimmedBrief}`,
+  ].join("\n");
 }
 
 function ErrorBadge({

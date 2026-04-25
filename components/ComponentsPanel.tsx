@@ -134,35 +134,37 @@ export function ComponentsPanel() {
       </aside>
       {selected ? (
         <section className="oc-components-edit">
-          <div className="oc-components-meta">
+          <div className="oc-components-chrome">
+            <div className="oc-components-meta">
+              <input
+                className="oc-tokens-name oc-components-name"
+                value={selected.name}
+                onChange={(e) =>
+                  updateSelected({
+                    name: e.target.value.replace(/[^A-Za-z0-9]/g, ""),
+                  })
+                }
+                spellCheck={false}
+                aria-label="Component name"
+              />
+              <button
+                type="button"
+                className="oc-components-remove"
+                onClick={removeSelected}
+                title="Remove component"
+              >
+                Remove
+              </button>
+            </div>
             <input
-              className="oc-tokens-name oc-components-name"
-              value={selected.name}
-              onChange={(e) =>
-                updateSelected({
-                  name: e.target.value.replace(/[^A-Za-z0-9]/g, ""),
-                })
-              }
+              className="oc-tokens-value oc-components-desc"
+              placeholder="One-line description (shown to the AI)"
+              value={selected.description}
+              onChange={(e) => updateSelected({ description: e.target.value })}
               spellCheck={false}
-              aria-label="Component name"
+              aria-label="Component description"
             />
-            <button
-              type="button"
-              className="oc-components-remove"
-              onClick={removeSelected}
-              title="Remove component"
-            >
-              Remove
-            </button>
           </div>
-          <input
-            className="oc-tokens-value oc-components-desc"
-            placeholder="One-line description (shown to the AI)"
-            value={selected.description}
-            onChange={(e) => updateSelected({ description: e.target.value })}
-            spellCheck={false}
-            aria-label="Component description"
-          />
           <div className="oc-components-code">
             <CodeEditor
               value={selected.code}
@@ -253,9 +255,11 @@ function ComponentPreview({ component }: { component: DesignComponent }) {
     [component.name],
   );
 
-  // Key includes the component name and token signature so renames and
-  // project token edits remount — otherwise Sandpack keeps stale `tokens.css`.
-  const key = `${component.id}:${component.name}:${designTokensSignature(tokens)}`;
+  // Key includes component id/name, token signature, and host theme so
+  // Sandpack remounts when any of them change. Without `theme`, the iframe
+  // can keep a stale `/index.js` boot (data-theme) even though the editor
+  // chrome flips — same pattern as PreviewPanel’s ScreenSandpack key.
+  const key = `${component.id}:${component.name}:${designTokensSignature(tokens)}:${theme}`;
 
   // Resizable height. Persists across reloads via localStorage; range
   // is clamped at render time so corrupt values can't escape.
@@ -452,12 +456,14 @@ function PreviewResizer({
  * Sandpack error overlay surfaces it — that's a useful signal too.
  */
 function buildPreviewAppCode(name: string): string {
-  // Wrapper background is `bg-tertiary` on purpose: most surface-like
-  // components (Card, Sheet, ListRow) use `bg-secondary` or
-  // `bg-primary`, so tertiary gives the component its own visible
-  // silhouette instead of blending into the wrapper.
+  // Match the host panel (`bg.primary` / --surface-1) so the iframe doesn’t
+  // read as a different gray than the rest of the Components tab. Components
+  // that need contrast still use `bg-secondary` in their own styles.
   if (name === "Button") {
     return BUTTON_PREVIEW_APP;
+  }
+  if (name === "TextField") {
+    return TEXT_FIELD_PREVIEW_APP;
   }
   return `import React from 'react';
 import Target from './components/${name}';
@@ -472,7 +478,7 @@ export default function App() {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 20,
-      background: 'var(--color-bg-tertiary)',
+      background: 'var(--color-bg-primary)',
       color: 'var(--color-fg-primary)',
       fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
       boxSizing: 'border-box',
@@ -580,7 +586,7 @@ export default function App() {
       justifyContent: 'center',
       gap: 18,
       padding: 16,
-      background: 'var(--color-bg-tertiary)',
+      background: 'var(--color-bg-primary)',
       color: 'var(--color-fg-primary)',
       fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
       boxSizing: 'border-box',
@@ -589,6 +595,44 @@ export default function App() {
       <Row caption="Secondary" variant="secondary" />
       <Row caption="Disabled" variant="primary" disabled />
       <Row caption="Capsule" variant="primary" capsule />
+    </div>
+  );
+}
+`;
+
+const TEXT_FIELD_PREVIEW_APP = `import React from 'react';
+import TextField from './components/TextField';
+import './tokens.css';
+
+export default function App() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 20,
+      padding: 20,
+      background: 'var(--color-bg-primary)',
+      color: 'var(--color-fg-primary)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+      boxSizing: 'border-box',
+    }}>
+      <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <TextField
+          label="Label"
+          placeholder="Placeholder"
+          fullWidth
+        />
+        <TextField
+          label="Filled"
+          placeholder="Placeholder"
+          defaultValue="Text"
+          fullWidth
+        />
+      </div>
     </div>
   );
 }

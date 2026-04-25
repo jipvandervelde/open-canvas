@@ -19,11 +19,8 @@ export type DesignComponent = {
   code: string; // the full TSX source, default-exported
 };
 
-// v13: Button drops the disabled opacity dimming — the new fg-tertiary
-// surface + fg-secondary ink in the *-disabled tokens are the visual
-// signal instead. Compounding both made disabled buttons nearly
-// invisible. v12 added the capsule prop; older context in git history.
-const STORAGE_KEY = "oc:design-components:v13";
+// v20: TextField placeholder color-mix 50% fg-tertiary. v19: JSDoc.
+const STORAGE_KEY = "oc:design-components:v20";
 
 const BUTTON_CODE = `import React, { useState } from 'react';
 import { STYLE } from '../component-tokens';
@@ -246,11 +243,14 @@ const TEXT_FIELD_CODE = `import React, { useState, useId } from 'react';
 import { STYLE } from '../component-tokens';
 
 /** TextField — reads surface + label + ring + message styles from
- *  component-tokens (\`text-field\`, \`text-field-label\`,
+ *  component-tokens (\`text-field\`, \`text-field-filled\`,
+ *  \`text-field-label\`, \`text-field-placeholder\`,
  *  \`text-field-focus-ring\`, \`text-field-error-ring\`,
  *  \`text-field-error-message\`, \`text-field-helper-message\`).
- *  Behavior (controlled/uncontrolled, focus tracking, iOS
- *  autocapitalize opt-outs) stays here. */
+ *  ::placeholder is styled via a scoped class + token color
+ *  (\`text-field-placeholder\` — fg-tertiary at 50% via \`color-mix\`). Type is
+ *  \`typography.body\`; filled value uses \`text-field-filled\` to apply
+ *  \`--font-callout-weight\` (thicker than empty/placeholder). */
 export default function TextField({
   label,
   placeholder,
@@ -274,6 +274,7 @@ export default function TextField({
   const [focused, setFocused] = useState(false);
   const controlled = value !== undefined;
   const current = controlled ? value : internal;
+  const hasValue = String(current ?? '').length > 0;
   const handleChange = (e) => {
     if (!controlled) setInternal(e.target.value);
     onChange && onChange(e);
@@ -284,6 +285,12 @@ export default function TextField({
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const inputStyle = STYLE['text-field'] || {};
   const labelStyle = STYLE['text-field-label'] || {};
+  const filledStyle = hasValue ? STYLE['text-field-filled'] || {} : {};
+  const phToken = STYLE['text-field-placeholder'] || {};
+  const phColor =
+    phToken.color != null && phToken.color !== ''
+      ? phToken.color
+      : 'color-mix(in oklch, var(--color-fg-tertiary) 50%, transparent)';
   const focusRing = STYLE['text-field-focus-ring'] || {};
   const errorRing = STYLE['text-field-error-ring'] || {};
   const errorMsg = STYLE['text-field-error-message'] || {};
@@ -304,6 +311,14 @@ export default function TextField({
         opacity: disabled ? 0.5 : 1,
       }}
     >
+      <style
+        dangerouslySetInnerHTML={{
+          __html:
+            '.oc-tf__input::placeholder, .oc-tf__input::-webkit-input-placeholder, .oc-tf__input::-moz-placeholder { color: ' +
+            phColor +
+            '; }',
+        }}
+      />
       {label && (
         <label
           htmlFor={id}
@@ -316,6 +331,7 @@ export default function TextField({
         </label>
       )}
       <input
+        className="oc-tf__input"
         id={id}
         name={name}
         type={type}
@@ -332,8 +348,6 @@ export default function TextField({
         data-1p-ignore=""
         aria-invalid={!!error || undefined}
         style={{
-          fontFamily: 'inherit',
-          fontWeight: 400,
           border: 'none',
           outline: 'none',
           WebkitAppearance: 'none',
@@ -345,6 +359,7 @@ export default function TextField({
             ? 'none'
             : 'box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           ...inputStyle,
+          ...filledStyle,
           ...ringStyle,
         }}
         onFocus={() => setFocused(true)}
@@ -419,8 +434,8 @@ export default function Switch({
   };
   const thumbStyle = {
     position: 'absolute',
-    top: 2,
-    left: 2,
+    top: 3,
+    left: 3,
     transform: on ? 'translateX(20px)' : 'translateX(0)',
     transition: reduceMotion
       ? 'none'
@@ -460,10 +475,12 @@ export default function Switch({
         minHeight: 44,
         width: '100%',
         color: 'var(--color-fg-primary)',
-        fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+        fontFamily: 'var(--font-body-family)',
         WebkitFontSmoothing: 'antialiased',
-        fontSize: 'var(--font-body)',
-        fontWeight: 400,
+        fontSize: 'var(--font-body-size)',
+        fontWeight: 'var(--font-body-weight)',
+        lineHeight: 'var(--font-body-line-height)',
+        letterSpacing: 'var(--font-body-letter-spacing)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         userSelect: 'none',
       }}
@@ -646,9 +663,8 @@ const TAB_BAR_CODE = `import React, { useState } from 'react';
 import { Icon } from '../centralIcons';
 import { STYLE } from '../component-tokens';
 
-/** TabBar — iOS-style bottom tab bar. 3-5 items. The bar sits on
- *  bg-secondary (one notch up from the bg-primary screen) so the
- *  surface-contrast alone defines its edge — no border, no inset line.
+/** TabBar — iOS-style bottom tab bar. 3-5 items. The bar uses bg-primary
+ *  (same base surface as the main screen) — no border, no inset line.
  *  Active item uses the filled icon + brand color; inactive is outlined
  *  + fg-secondary. Font weight is CONSTANT across states (no layout
  *  shift). Press-scale is reduced-motion-aware. */
@@ -746,17 +762,7 @@ function TabItem({ tab, active, onClick }) {
         size={26}
         color="currentColor"
       />
-      <span
-        style={{
-          fontSize: 10,
-          // fontWeight inherited from the parent button's tab-item-*
-          // token — keeps active + inactive at the SAME weight (no
-          // layout shift), only color flips.
-          letterSpacing: 0.1,
-        }}
-      >
-        {tab.label}
-      </span>
+      <span>{tab.label}</span>
     </button>
   );
 }
@@ -788,7 +794,7 @@ const DEFAULTS: DesignComponent[] = [
     id: "c_text_field",
     name: "TextField",
     description:
-      "iOS text input with stacked label + optional helper/error. Props: label, placeholder, value, onChange, type, error, helper, disabled, fullWidth, autoComplete.",
+      "iOS text input, stacked label (slight horizontal inset) + ::placeholder (fg-tertiary 50%) + medium weight when filled. Props: label, placeholder, value, onChange, type, error, helper, disabled, fullWidth, autoComplete.",
     code: TEXT_FIELD_CODE,
   },
   {

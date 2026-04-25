@@ -66,11 +66,11 @@ export const DEFAULT_SCREEN_CODE = `export default function App() {
       >
         <div
           style={{
-            fontFamily: 'var(--font-display-family)',
-            fontSize: 'var(--font-display-size)',
-            fontWeight: 'var(--font-display-weight)',
-            lineHeight: 'var(--font-display-line-height)',
-            letterSpacing: 'var(--font-display-letter-spacing)',
+            fontFamily: 'var(--font-largeTitle-family)',
+            fontSize: 'var(--font-largeTitle-size)',
+            fontWeight: 'var(--font-largeTitle-weight)',
+            lineHeight: 'var(--font-largeTitle-line-height)',
+            letterSpacing: 'var(--font-largeTitle-letter-spacing)',
             color: 'var(--color-fg-primary)',
           }}
         >

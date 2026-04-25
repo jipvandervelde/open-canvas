@@ -70,7 +70,7 @@ Every value should be a CSS variable. The Tokens panel owns the live map (names 
 
 **Radius**: \`var(--radius-xs)\` through \`var(--radius-xl)\` for content, \`var(--radius-pill)\` for fully-rounded CTAs.
 
-**Font size** — rough Apple HIG mapping: \`var(--font-caption)\` · \`footnote\` · \`body\` · \`callout\` · \`title\` · \`headline\` · \`display\`. Three levels per screen is plenty — more usually means the IA is overloaded.
+**Font size** — rough Apple HIG mapping: \`var(--font-caption2)\` · \`caption\` · \`footnote\` · \`callout\` · \`body\` · \`action\` (17) · \`headline\` (19) · \`title\` (24) · \`largeTitle\` (36). Three levels per screen is plenty — more usually means the IA is overloaded.
 
 ## Visual theme & atmosphere
 
@@ -91,7 +91,7 @@ Every value should be a CSS variable. The Tokens panel owns the live map (names 
 ## Typography
 
 - **System fonts** on both modes: \`fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif'\`. Costs zero bytes, matches the platform, gives native feel.
-- **Hierarchy is three steps, not seven.** A screen usually has: title (\`--font-title\` or \`--font-headline\`, 600-700), body (\`--font-body\`, 400), caption/footnote (\`--font-footnote\` or \`--font-caption\`, 500). More levels means the screen has too much; cut it.
+- **Hierarchy is three steps, not seven.** A screen usually has: display headlines (\`--font-headline\` 19, \`--font-title\` 24, \`--font-largeTitle\` 36, 600–700), body (\`--font-body\`, 400), caption/footnote (\`--font-footnote\` or \`--font-caption\`, 500). More levels means the screen has too much; cut it.
 - **Tabular numerals on changing numbers.** Counters, timers, prices, percentages — \`fontVariantNumeric: 'tabular-nums'\` prevents layout shift.
 - **Optical alignment over geometric.** Buttons with icons, play triangles, and asymmetric glyphs need manual nudges — a 1-2px offset against the math is usually right.
 - **Font smoothing on light-on-dark only.** \`-webkit-font-smoothing: antialiased\` is correct there; don't apply it everywhere.

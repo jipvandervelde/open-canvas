@@ -81,6 +81,18 @@ const SANDPACK_FILL_CSS = `
   display: flex !important;
   flex-direction: column !important;
 }
+.oc-screen .sp-layout,
+.oc-screen .sp-preview-container,
+.oc-screen .sp-preview-iframe {
+  border: 0 !important;
+  background: var(--surface-1) !important;
+}
+.oc-screen .sp-wrapper {
+  position: absolute !important;
+  inset: -1px !important;
+  width: auto !important;
+  height: auto !important;
+}
 body[data-oc-streaming="true"] .oc-screen .sp-error,
 body[data-oc-streaming="true"] .oc-screen .sp-overlay,
 body[data-oc-streaming="true"] .oc-screen .sp-cm,
@@ -100,8 +112,12 @@ if (
   document.head.appendChild(style);
 }
 
-export function SANDPACK_INDEX_JS_FOR_THEME(theme: "light" | "dark"): string {
+export function SANDPACK_INDEX_JS_FOR_THEME(
+  theme: "light" | "dark",
+  routeParams: Record<string, string> = {},
+): string {
   const colorScheme = theme === "dark" ? "dark" : "light";
+  const initialRouteParams = JSON.stringify(routeParams);
   return `import App from "./App";
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -111,6 +127,7 @@ import "./tokens.css";
 // tokens.css [data-theme="dark"] selector applies to design-token var()s
 // referenced by the screen code.
 document.documentElement.setAttribute("data-theme", "${theme}");
+window.__ocRouteParams = ${initialRouteParams};
 
 const resetStyle = document.createElement("style");
 resetStyle.textContent = \`
@@ -918,6 +935,9 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
 
   const isDark = theme === "dark";
   const isInteractive = canvasMode === "cursor";
+  const routeParams: Record<string, string> = shape.props.dataRecordId
+    ? { id: String(shape.props.dataRecordId) }
+    : {};
   // Both inspector and annotator arm element selection inside the selected
   // screen — they share the in-iframe agent, they just route the selection
   // payload to different parent-side UIs.
@@ -1010,7 +1030,7 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
   // panels mirror this same recipe (see globals.css `.oc-chat, .oc-preview`).
   const shadow = isEditing
     ? `0 0 0 2px var(--accent-base), 0 8px 24px rgba(0,0,0,${isDark ? 0.4 : 0.08})`
-    : `0 4px 12px rgba(0,0,0,${isDark ? 0.22 : 0.06})`;
+    : `0 0 0 1px var(--border-subtle), 0 4px 12px rgba(0,0,0,${isDark ? 0.22 : 0.06})`;
 
   return (
     <div
@@ -1021,8 +1041,8 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
         width: shape.props.w,
         height: shape.props.h,
         background: "var(--surface-1)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 12,
+        border: "none",
+        borderRadius: "var(--chrome-panel-radius)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -1035,6 +1055,7 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
           flex: 1,
           position: "relative",
           background: "var(--surface-1)",
+          overflow: "hidden",
           pointerEvents:
             isEditing || isInteractive || isArmed ? "auto" : "none",
         }}
@@ -1049,12 +1070,12 @@ export function ScreenBody({ shape }: { shape: ScreenShape }) {
           // [data-theme="dark"] selectors never engage on toggle.
           // Include `designTokensSignature` so edits in the Tokens panel
           // rebuild Sandpack — otherwise the iframe keeps stale CSS vars.
-          key={`${shape.id}:${resetKey}:${theme}:${designTokensSignature(tokens)}`}
+          key={`${shape.id}:${resetKey}:${theme}:${shape.props.dataEntityName ?? ""}:${shape.props.dataRecordId ?? ""}:${designTokensSignature(tokens)}`}
           template="react"
           theme={theme}
           files={{
             "/App.js": shape.props.code,
-            "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme),
+            "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme, routeParams),
             "/tokens.css": tokensCss,
             "/motion.js": motionJs,
             "/routes.js": routesJs,
