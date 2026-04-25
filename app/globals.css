@@ -92,6 +92,7 @@
   --z-chat: 50;
   --z-modal: 100;
   --z-toast: 200;
+  --z-cursor: 2147483647;
 
   /* Workspace sidebar widths (consumed by TldrawCanvas + panels) */
   --left-panel-w: 440px;
@@ -243,6 +244,17 @@ body {
 
 body {
   font-variant-ligatures: common-ligatures;
+}
+
+/* Custom cursor — `LocalUserCursor` paints the arrow tool-wide, so the OS
+   cursor is hidden everywhere descended from <body>. `!important` is
+   required to beat inline `style="cursor: …"` on individual nodes (e.g. the
+   canvas root, drag handles). Text caret inside inputs/textareas is a
+   separate primitive and remains visible. */
+html,
+body,
+body * {
+  cursor: none !important;
 }
 
 /* Tabular numerics for sizes, times, counts */

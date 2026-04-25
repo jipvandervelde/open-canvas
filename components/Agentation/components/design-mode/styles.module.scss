@@ -1,3 +1,5 @@
+@use "sass:color";
+
 // =============================================================================
 // Layout Mode Styles
 // =============================================================================
@@ -1438,7 +1440,7 @@ $red: #ef4444;
   }
 
   &::-webkit-slider-thumb:hover {
-    background: darken(#f97316, 8%);
+    background: color.adjust($orange, $lightness: -8%);
   }
 
   &::-moz-range-thumb {

@@ -167,8 +167,58 @@ resetStyle.textContent = \`
     display: none !important;
     pointer-events: none !important;
   }
+  /* OS cursor hidden inside the iframe — the parent's LocalUserCursor sits
+     on top in the parent document via overlay z-index. We relay pointer
+     positions out via postMessage below so the parent can paint at the
+     correct viewport position even when the pointer is over an iframe. */
+  html, body, body * { cursor: none !important; }
 \`;
 document.head.appendChild(resetStyle);
+
+// Relay pointer position to the parent so LocalUserCursor can keep
+// painting the custom cursor while the OS pointer is over this iframe.
+// Coordinates are unscaled iframe-internal pixels; the parent translates
+// to viewport pixels using the iframe's getBoundingClientRect + scale.
+(function attachCursorRelay() {
+  let raf = 0;
+  let pending = null;
+  function post(msg) {
+    try { window.parent.postMessage(msg, "*"); } catch (e) {}
+  }
+  function flush() {
+    raf = 0;
+    if (!pending) return;
+    post(pending);
+    pending = null;
+  }
+  function leave() {
+    pending = null;
+    if (raf) {
+      window.cancelAnimationFrame(raf);
+      raf = 0;
+    }
+    post({ __oc: "oc:cursor-leave" });
+  }
+  document.addEventListener(
+    "pointermove",
+    function (e) {
+      pending = {
+        __oc: "oc:cursor",
+        x: e.clientX,
+        y: e.clientY,
+        pointerType: e.pointerType || "mouse",
+      };
+      if (!raf) raf = window.requestAnimationFrame(flush);
+    },
+    { passive: true }
+  );
+  document.addEventListener("pointerleave", function () {
+    leave();
+  });
+  window.addEventListener("blur", function () {
+    leave();
+  });
+})();
 
 function __ocKillErrorOverlay() {
   const nodes = document.body ? document.body.children : [];

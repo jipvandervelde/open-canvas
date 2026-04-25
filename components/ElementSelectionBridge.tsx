@@ -28,6 +28,11 @@ export function ElementSelectionBridge() {
       if (!data || typeof data !== "object") return;
       const marker = (data as { __oc?: string }).__oc;
       if (marker === "oc:navigate") {
+        // The right-side simulator owns its own click-through state. Canvas
+        // route navigation should only respond to iframes embedded on the
+        // canvas itself, otherwise preview clicks unexpectedly change canvas
+        // selection.
+        if (isMessageFromPreviewPanel(e.source)) return;
         const d = data as { to?: string; params?: Record<string, string> };
         if (!d.to || !editor) return;
         const route = routeTableStore.findByPath(d.to);
@@ -119,4 +124,17 @@ export function ElementSelectionBridge() {
   }, [editor]);
 
   return null;
+}
+
+function isMessageFromPreviewPanel(source: MessageEventSource | null): boolean {
+  if (!source) return false;
+  const panel = document.querySelector(".oc-preview");
+  if (!panel) return false;
+  const iframes = panel.querySelectorAll<HTMLIFrameElement>(
+    'iframe[title="Sandpack Preview"]',
+  );
+  for (const iframe of iframes) {
+    if (iframe.contentWindow === source) return true;
+  }
+  return false;
 }

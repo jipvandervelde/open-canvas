@@ -550,14 +550,11 @@ export function OpenCanvas() {
         backgroundSize: `${dotSize}px ${dotSize}px`,
         backgroundPosition: `${camera.x * camera.z}px ${camera.y * camera.z}px`,
         ["--oc-grid-opacity" as string]: gridOpacity,
-        cursor:
-          interaction.kind === "pan"
-            ? "grabbing"
-            : tool === "hand" || spaceHeldRef.current
-              ? "grab"
-              : tool === "annotator"
-                ? "crosshair"
-                : "default",
+        // OS cursor is hidden globally (see globals.css) so LocalUserCursor
+        // is the single pointer across the tool. Direction-meaningful modes
+        // (pan/grab/crosshair) currently fall back to the custom arrow too;
+        // we'll paint per-mode cursor variants when needed.
+        cursor: "none",
         touchAction: "none",
       }}
       onPointerDown={onRootPointerDown}

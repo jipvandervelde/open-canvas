@@ -17,11 +17,27 @@ export type DesignComponent = {
   name: string; // PascalCase, must be unique: "Button", "Card", "ChipRow"
   description: string; // one line, shown in UI + sent to AI
   code: string; // the full TSX source, default-exported
+  aliases?: string[]; // alternate names users/agents may use for this pattern
+  tags?: string[]; // machine-readable categories for retrieval/reuse
+  useWhen?: string[]; // concrete usage triggers
+  avoidWhen?: string[]; // cases where this component is the wrong primitive
+  props?: Array<{
+    name: string;
+    description: string;
+    required?: boolean;
+    example?: string;
+  }>;
+  canonical?: boolean; // preferred component for its pattern
+  replaces?: string[]; // older names this component supersedes
+  reserved?: boolean; // baseline component; createComponent may not overwrite it
 };
 
+// v30: structured component metadata for retrieval/reuse enforcement.
+// v29: add reserved BottomTabBar baseline and merge missing defaults into
+// hydrated projects so older localStorage libraries pick it up.
 // v28: large NavBar tightens space above title, adds bottom breathing room.
 // v27: NavBar large variant + badges.
-const STORAGE_KEY = "oc:design-components:v28";
+const STORAGE_KEY = "oc:design-components:v30";
 
 const BUTTON_CODE = `import React, { useState } from 'react';
 import { STYLE } from '../component-tokens';
@@ -658,18 +674,18 @@ export default function SegmentedControl({
 }
 `;
 
-const TAB_BAR_CODE = `import React, { useState } from 'react';
+const BOTTOM_TAB_BAR_CODE = `import React, { useState } from 'react';
 // Shared components live at /components/*, so the icons module is one
 // level up. Screens at the root use './centralIcons' instead.
 import { Icon } from '../centralIcons';
 import { STYLE } from '../component-tokens';
 
-/** TabBar — iOS-style bottom tab bar. 3-5 items. The bar uses bg-primary
+/** BottomTabBar — iOS-style bottom tab bar. 3-5 items. The bar uses bg-primary
  *  (same base surface as the main screen) — no border, no inset line.
  *  Active item uses the filled icon + brand color; inactive is outlined
  *  + fg-secondary. Font weight is CONSTANT across states (no layout
  *  shift). Press-scale is reduced-motion-aware. */
-export default function TabBar({
+export default function BottomTabBar({
   items,
   activeKey,
   onChange,
@@ -767,6 +783,13 @@ function TabItem({ tab, active, onClick }) {
     </button>
   );
 }
+`;
+
+const TAB_BAR_CODE = `import BottomTabBar from './BottomTabBar';
+
+/** TabBar — compatibility alias.
+ *  Prefer importing BottomTabBar for top-level mobile navigation. */
+export default BottomTabBar;
 `;
 
 const ICON_SWAP_CODE = `import React, { useState, useEffect, useRef, useId } from 'react';
@@ -1218,6 +1241,24 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "Primary / secondary / ghost button. Props: variant, onClick, disabled, fullWidth.",
     code: BUTTON_CODE,
+    aliases: ["CTA", "PrimaryButton", "IconButton", "ActionButton"],
+    tags: ["control", "button", "cta", "form", "interactive"],
+    useWhen: [
+      "primary, secondary, or ghost action buttons",
+      "icon-only 44px tap targets",
+      "form submit or screen-level CTA",
+    ],
+    avoidWhen: ["navigation tabs", "plain list rows", "text links"],
+    props: [
+      { name: "children", description: "Button label or inline content." },
+      { name: "variant", description: "'primary' | 'secondary' | 'ghost'.", example: "primary" },
+      { name: "fullWidth", description: "Stretch to parent width.", example: "true" },
+      { name: "iconOnly", description: "Icon node for square icon-only button." },
+      { name: "ariaLabel", description: "Required when iconOnly is used." },
+      { name: "capsule", description: "Use pill shape instead of rounded rectangle." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_card",
@@ -1225,6 +1266,22 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "Surface with padding, radius, and soft shadow. Props: padding, gap, direction.",
     code: CARD_CODE,
+    aliases: ["Surface", "Panel", "Tile", "Container"],
+    tags: ["surface", "card", "container", "panel", "layout"],
+    useWhen: [
+      "a grouped surface needs padding, radius, and tokenized fill",
+      "a tappable card/list tile should share press feedback",
+    ],
+    avoidWhen: ["full page sections", "bottom navigation bars", "toolbars"],
+    props: [
+      { name: "children", description: "Content inside the card.", required: true },
+      { name: "interactive", description: "Render as pressable button.", example: "true" },
+      { name: "padding", description: "Optional padding override.", example: "var(--space-lg)" },
+      { name: "gap", description: "Flex gap between children." },
+      { name: "direction", description: "'column' | 'row'." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_stack",
@@ -1232,6 +1289,22 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "Auto-layout container. Props: direction ('row'|'column'), gap, align, justify, padding.",
     code: STACK_CODE,
+    aliases: ["VStack", "HStack", "Flex", "AutoLayout"],
+    tags: ["layout", "flex", "stack", "auto-layout"],
+    useWhen: [
+      "screen or section layout needs consistent flex/gap primitives",
+      "you would otherwise write repeated display:flex containers",
+    ],
+    avoidWhen: ["visual surfaces that need background/radius", "semantic form controls"],
+    props: [
+      { name: "direction", description: "'column' or 'row'.", example: "column" },
+      { name: "gap", description: "Spacing between children.", example: "var(--space-md)" },
+      { name: "align", description: "alignItems value." },
+      { name: "justify", description: "justifyContent value." },
+      { name: "padding", description: "Container padding." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_text_field",
@@ -1239,13 +1312,69 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "iOS text input, stacked label (slight horizontal inset) + ::placeholder (fg-tertiary 50%) + medium weight when filled. Props: label, placeholder, value, onChange, type, error, helper, disabled, fullWidth, autoComplete.",
     code: TEXT_FIELD_CODE,
+    aliases: ["Input", "TextInput", "Field", "SearchField"],
+    tags: ["form", "input", "text-field", "ios", "control"],
+    useWhen: [
+      "text, email, search, or password inputs",
+      "forms that need label/helper/error states",
+    ],
+    avoidWhen: ["static display text", "segmented filters", "freeform rich text editors"],
+    props: [
+      { name: "label", description: "Visible label above the field." },
+      { name: "placeholder", description: "Placeholder text." },
+      { name: "value", description: "Controlled value." },
+      { name: "onChange", description: "Input change handler." },
+      { name: "error", description: "Error message and invalid styling." },
+      { name: "helper", description: "Helper text under the field." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_tab_bar",
     name: "TabBar",
     description:
-      "iOS bottom tab bar, 3-5 items. Active = filled icon + brand; inactive = outlined + fg-secondary. Props: items (key, label, icon), activeKey, onChange.",
+      "Compatibility alias for BottomTabBar. Do not import in new screens; use BottomTabBar instead.",
     code: TAB_BAR_CODE,
+    aliases: ["LegacyTabBar"],
+    tags: ["navigation", "bottom-tabs", "alias", "legacy"],
+    useWhen: ["only to keep older screens importing TabBar working"],
+    avoidWhen: ["new top-level mobile navigation", "new generated screens"],
+    props: [
+      { name: "items", description: "Same as BottomTabBar items." },
+      { name: "activeKey", description: "Same as BottomTabBar activeKey." },
+      { name: "onChange", description: "Same as BottomTabBar onChange." },
+    ],
+    canonical: false,
+    replaces: [],
+    reserved: true,
+  },
+  {
+    id: "c_bottom_tab_bar",
+    name: "BottomTabBar",
+    description:
+      "Canonical iOS bottom tab bar for top-level mobile navigation, 3-5 items. Props: items (key, label, icon), activeKey, onChange. Import this instead of creating or inlining tab markup.",
+    code: BOTTOM_TAB_BAR_CODE,
+    aliases: ["TabBar", "BottomNavigation", "BottomNav", "MobileTabBar", "PrimaryTabs"],
+    tags: ["navigation", "mobile", "ios", "bottom-tabs", "tab-bar", "canonical"],
+    useWhen: [
+      "top-level mobile navigation between 3-5 app sections",
+      "screens share the same bottom nav labels, icons, order, and active state",
+      "the brief says tab bar, bottom nav, bottom navigation, or primary tabs",
+    ],
+    avoidWhen: [
+      "segmented filters inside content",
+      "desktop sidebar navigation",
+      "one-off icon rows that do not navigate between app sections",
+    ],
+    props: [
+      { name: "items", description: "Array of { key, label, icon }.", required: true, example: "[{ key: 'today', label: 'Today', icon: 'IconCalendar' }]" },
+      { name: "activeKey", description: "Key of the active tab.", required: true, example: "today" },
+      { name: "onChange", description: "Called with the picked key." },
+    ],
+    canonical: true,
+    replaces: ["TabBar"],
+    reserved: true,
   },
   {
     id: "c_nav_bar",
@@ -1253,6 +1382,23 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "iOS top nav bar with two layouts. variant='centered' (default): small headline title centered, optional leading/trailing/secondary actions. variant='large': big left-aligned largeTitle row + optional subtitle (no leading); trailing icons can carry a numeric/dot badge. Props: title, subtitle, variant, leading, trailing, secondaryTrailing, ariaLabel.",
     code: NAV_BAR_CODE,
+    aliases: ["TopBar", "Header", "AppBar", "NavigationBar"],
+    tags: ["navigation", "header", "top-bar", "ios", "toolbar"],
+    useWhen: [
+      "mobile top navigation/header",
+      "screen title with leading back/cancel and trailing action icons",
+      "large-title iOS screens",
+    ],
+    avoidWhen: ["bottom tabs", "inline section headers", "desktop global nav"],
+    props: [
+      { name: "title", description: "Title string or node." },
+      { name: "variant", description: "'centered' | 'large'.", example: "large" },
+      { name: "leading", description: "Optional icon/text action." },
+      { name: "trailing", description: "Optional icon/text action." },
+      { name: "secondaryTrailing", description: "Optional second icon action when trailing exists." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_switch",
@@ -1260,6 +1406,19 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "iOS toggle switch. 51x31 track, brand when on. Props: checked, defaultChecked, onChange, disabled, label, ariaLabel.",
     code: SWITCH_CODE,
+    aliases: ["Toggle", "ToggleSwitch"],
+    tags: ["form", "control", "toggle", "switch", "settings"],
+    useWhen: ["binary settings", "enable/disable options", "preference rows"],
+    avoidWhen: ["multi-option choices", "navigation", "form submission"],
+    props: [
+      { name: "checked", description: "Controlled boolean value." },
+      { name: "defaultChecked", description: "Initial uncontrolled boolean value." },
+      { name: "onChange", description: "Called with next boolean." },
+      { name: "label", description: "Optional row label." },
+      { name: "ariaLabel", description: "Required when no visible label." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_icon_swap",
@@ -1267,6 +1426,23 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "Central icon with optional display chip (plain | tinted | filled) and a blur+scale crossfade when name/variant changes. Pass onClick to make it a press-scale button. Props: name, variant, size, color, display, onClick, disabled, ariaLabel.",
     code: ICON_SWAP_CODE,
+    aliases: ["IconButton", "IconChip", "AnimatedIcon"],
+    tags: ["icon", "animation", "control", "chip"],
+    useWhen: [
+      "central icon display with optional tinted/filled chip",
+      "icon changes should animate smoothly",
+      "standalone icon button with press feedback",
+    ],
+    avoidWhen: ["bottom tab icons inside BottomTabBar", "large illustrations"],
+    props: [
+      { name: "name", description: "Exact Central Icons name.", required: true },
+      { name: "variant", description: "'outlined' | 'filled'." },
+      { name: "display", description: "'plain' | 'tinted' | 'filled'." },
+      { name: "onClick", description: "Makes it interactive." },
+      { name: "ariaLabel", description: "Required when interactive or standalone." },
+    ],
+    canonical: true,
+    reserved: true,
   },
   {
     id: "c_segmented_control",
@@ -1274,6 +1450,26 @@ const DEFAULTS: DesignComponent[] = [
     description:
       "iOS segmented picker. Active pill floats on bg-primary. Props: options (value, label), value, defaultValue, onChange, fullWidth, disabled.",
     code: SEGMENTED_CONTROL_CODE,
+    aliases: ["SegmentedPicker", "Tabs", "FilterTabs", "PillTabs"],
+    tags: ["control", "segmented-control", "filter", "picker", "ios"],
+    useWhen: [
+      "switching filters or modes within the same screen",
+      "2-5 mutually exclusive local options",
+    ],
+    avoidWhen: [
+      "top-level app navigation between screens",
+      "bottom tab bars",
+      "multi-select filters",
+    ],
+    props: [
+      { name: "options", description: "Array of { value, label }.", required: true },
+      { name: "value", description: "Controlled active value." },
+      { name: "defaultValue", description: "Initial uncontrolled value." },
+      { name: "onChange", description: "Called with picked value." },
+      { name: "fullWidth", description: "Stretch to parent width." },
+    ],
+    canonical: true,
+    reserved: true,
   },
 ];
 
@@ -1289,10 +1485,15 @@ class DesignComponentsStore {
     this.hydrated = true;
     if (typeof window === "undefined") return this.current;
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw =
+        window.localStorage.getItem(STORAGE_KEY) ??
+        window.localStorage.getItem("oc:design-components:v29") ??
+        window.localStorage.getItem("oc:design-components:v28");
       if (raw) {
         const parsed = JSON.parse(raw) as DesignComponent[];
-        if (Array.isArray(parsed)) this.current = parsed;
+        if (Array.isArray(parsed)) {
+          this.current = mergeDefaultComponents(parsed);
+        }
       }
     } catch {
       /* ignore */
@@ -1350,10 +1551,21 @@ class DesignComponentsStore {
   /** Short human-readable inventory for the agent's system prompt. */
   toPromptDescription(): string {
     if (this.current.length === 0) return "";
-    const lines = ["Shared components available (import from '/components/{Name}'):"];
-    for (const c of this.current) {
-      lines.push(`- ${c.name} — ${c.description}`);
+    const sorted = [...this.current].sort((a, b) => {
+      if (a.canonical !== b.canonical) return a.canonical ? -1 : 1;
+      if (a.name === "BottomTabBar") return -1;
+      if (b.name === "BottomTabBar") return 1;
+      return a.name.localeCompare(b.name);
+    });
+    const lines = [
+      "Shared component registry (use exact imports; compose instead of inlining covered patterns):",
+    ];
+    for (const c of sorted) {
+      lines.push(componentPromptLine(c));
     }
+    lines.push(
+      "Canonical names win over aliases. If a component's aliases/tags/useWhen match the UI you need, import that component and pass props; do not recreate its markup inline.",
+    );
     return lines.join("\n");
   }
 
@@ -1369,6 +1581,67 @@ class DesignComponentsStore {
   private notify() {
     for (const l of this.listeners) l(this.current);
   }
+}
+
+function mergeDefaultComponents(stored: DesignComponent[]): DesignComponent[] {
+  const defaultsByName = new Map(DEFAULTS.map((c) => [c.name, c]));
+  const merged = stored.map((c) => {
+    const baseline = defaultsByName.get(c.name);
+    if (!baseline) return c;
+    return {
+      ...baseline,
+      ...c,
+      aliases: c.aliases ?? baseline.aliases,
+      tags: c.tags ?? baseline.tags,
+      useWhen: c.useWhen ?? baseline.useWhen,
+      avoidWhen: c.avoidWhen ?? baseline.avoidWhen,
+      props: c.props ?? baseline.props,
+      canonical: c.canonical ?? baseline.canonical,
+      replaces: c.replaces ?? baseline.replaces,
+      reserved: c.reserved ?? baseline.reserved,
+    };
+  });
+  const byName = new Set(merged.map((c) => c.name));
+  const missingDefaults = DEFAULTS.filter((c) => !byName.has(c.name)).map((c) => ({
+    ...c,
+  }));
+  return [...merged, ...missingDefaults];
+}
+
+export function baselineComponentForName(name: string): DesignComponent | null {
+  const needle = name.toLowerCase();
+  return (
+    DEFAULTS.find(
+      (c) =>
+        c.name.toLowerCase() === needle ||
+        (c.aliases ?? []).some((a) => a.toLowerCase() === needle),
+    ) ?? null
+  );
+}
+
+export function isReservedBaselineComponentName(name: string): boolean {
+  return !!baselineComponentForName(name);
+}
+
+export function componentPromptLine(c: DesignComponent): string {
+  const importPath = `import ${c.name} from './components/${c.name}';`;
+  const parts = [
+    `- ${c.name}${c.canonical ? " (canonical)" : ""}${c.reserved ? " (baseline)" : ""}: ${importPath} — ${c.description || "(no description)"}`,
+  ];
+  if (c.aliases?.length) parts.push(`  Aliases/keywords: ${c.aliases.join(", ")}`);
+  if (c.tags?.length) parts.push(`  Tags: ${c.tags.join(", ")}`);
+  if (c.useWhen?.length) parts.push(`  Use when: ${c.useWhen.join("; ")}`);
+  if (c.avoidWhen?.length) parts.push(`  Avoid when: ${c.avoidWhen.join("; ")}`);
+  if (c.replaces?.length) parts.push(`  Replaces/prefer over: ${c.replaces.join(", ")}`);
+  if (c.props?.length) {
+    parts.push(
+      "  Props: " +
+        c.props
+          .map((p) => `${p.name}${p.required ? " (required)" : ""}${p.example ? ` e.g. ${p.example}` : ""} — ${p.description}`)
+          .join("; "),
+    );
+  }
+  return parts.join("\n");
 }
 
 export const designComponentsStore = new DesignComponentsStore();

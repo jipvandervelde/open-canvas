@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { getIconComponent } from "@/lib/icon-render-client";
 import {
   SandpackProvider,
@@ -85,14 +91,17 @@ import { PreviewPanelCornerResizer } from "@/components/PreviewPanelCornerResize
  */
 export function PreviewPanel() {
   const { editor } = useEditorRef();
-  const [mounted, setMounted] = useState(false);
+  const rootRef = useRef<HTMLElement | null>(null);
+  const mounted = useIsClient();
   const [theme, setTheme] = useState<Theme>(() => themeStore.get());
   const [state, setState] = useState(() => previewPanelStore.get());
+  const [previewNavigation, setPreviewNavigation] = useState<{
+    baseScreenId: string | null;
+    screenId: string;
+    params: Record<string, string>;
+  } | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
-    return themeStore.subscribe(setTheme);
-  }, []);
+  useEffect(() => themeStore.subscribe(setTheme), []);
   useEffect(() => previewPanelStore.subscribe(setState), []);
 
   const selectedScreen = useValue(
@@ -112,13 +121,44 @@ export function PreviewPanel() {
     [editor],
   );
 
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      const data = e.data;
+      if (!data || typeof data !== "object") return;
+      if ((data as { __oc?: string }).__oc !== "oc:navigate") return;
+      const root = rootRef.current;
+      if (!root || !isMessageSourceInside(root, e.source)) return;
+      const d = data as { to?: string; params?: Record<string, string> };
+      if (!d.to) return;
+      const route = routeTableStore.findByPath(d.to);
+      if (!route) return;
+      setPreviewNavigation({
+        baseScreenId: selectedScreen?.id ?? null,
+        screenId: route.id,
+        params: d.params ?? {},
+      });
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [selectedScreen?.id]);
+
   if (!mounted) return null;
 
   const width = state.collapsed ? COLLAPSED_WIDTH : state.width;
   const isDark = theme === "dark";
+  const activePreviewNavigation =
+    previewNavigation?.baseScreenId === (selectedScreen?.id ?? null)
+      ? previewNavigation
+      : null;
+  const previewScreen =
+    activePreviewNavigation && editor
+      ? editor.getShape(activePreviewNavigation.screenId) ?? selectedScreen
+      : selectedScreen;
+  const previewRouteParams = activePreviewNavigation?.params ?? {};
 
   return (
     <aside
+      ref={rootRef}
       data-agentation-ignore
       className="oc-preview fixed flex flex-col overflow-hidden"
       data-collapsed={state.collapsed || undefined}
@@ -146,7 +186,8 @@ export function PreviewPanel() {
         <CollapsedRail />
       ) : (
         <ExpandedContents
-          screen={selectedScreen}
+          screen={previewScreen}
+          routeParams={previewRouteParams}
           deviceId={state.deviceId}
           zoomMode={state.zoomMode}
           isDark={isDark}
@@ -180,11 +221,13 @@ function CollapsedRail() {
 
 function ExpandedContents({
   screen,
+  routeParams,
   deviceId,
   zoomMode,
   isDark,
 }: {
   screen: ScreenShape | null;
+  routeParams: Record<string, string>;
   deviceId: ViewportPresetId;
   zoomMode: PreviewZoomMode;
   isDark: boolean;
@@ -199,6 +242,7 @@ function ExpandedContents({
       <Stage
         device={device}
         screen={screen}
+        routeParams={routeParams}
         zoomMode={zoomMode}
         isDark={isDark}
       />
@@ -311,11 +355,13 @@ function DeviceSelector({ value }: { value: ViewportPresetId }) {
 function Stage({
   device,
   screen,
+  routeParams,
   zoomMode,
   isDark,
 }: {
   device: ViewportPreset;
   screen: ScreenShape | null;
+  routeParams: Record<string, string>;
   zoomMode: PreviewZoomMode;
   isDark: boolean;
 }) {
@@ -371,7 +417,12 @@ function Stage({
             flex: "0 0 auto",
           }}
         >
-          <DeviceFrame device={device} screen={screen} isDark={isDark} />
+          <DeviceFrame
+            device={device}
+            screen={screen}
+            routeParams={routeParams}
+            isDark={isDark}
+          />
         </div>
       </div>
     </div>
@@ -381,10 +432,12 @@ function Stage({
 function DeviceFrame({
   device,
   screen,
+  routeParams,
   isDark,
 }: {
   device: ViewportPreset;
   screen: ScreenShape | null;
+  routeParams: Record<string, string>;
   isDark: boolean;
 }) {
   const [tokens, setTokens] = useState<DesignTokens>(() =>
@@ -434,6 +487,7 @@ function DeviceFrame({
       >
         <ScreenSandpack
           screen={screen}
+          routeParams={routeParams}
           viewportId={device.id}
           isDark={isDark}
         />
@@ -456,10 +510,12 @@ function DeviceFrame({
 
 function ScreenSandpack({
   screen,
+  routeParams,
   viewportId,
   isDark,
 }: {
   screen: ScreenShape | null;
+  routeParams: Record<string, string>;
   viewportId: ViewportPresetId;
   isDark: boolean;
 }) {
@@ -523,14 +579,17 @@ function ScreenSandpack({
   void motionPresets; // subscribed so toMotionJs is fresh
   const theme: Theme = isDark ? "dark" : "light";
   const code = screen?.props.code ?? DEFAULT_SCREEN_CODE;
-  const routeParams: Record<string, string> = screen?.props.dataRecordId
-    ? { id: String(screen.props.dataRecordId) }
-    : {};
+  const initialRouteParams =
+    Object.keys(routeParams).length > 0
+      ? routeParams
+      : screen?.props.dataRecordId
+        ? { id: String(screen.props.dataRecordId) }
+        : {};
 
   // Key includes the screen id + device + token signature so the iframe
   // remounts when the user swaps device/screen or edits project tokens.
   // Without the token sig, Sandpack can keep a stale `tokens.css`.
-  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}:${screen?.props.dataEntityName ?? ""}:${screen?.props.dataRecordId ?? ""}:${designTokensSignature(tokens)}`;
+  const key = `${screen?.id ?? "none"}:${viewportId}:${theme}:${JSON.stringify(initialRouteParams)}:${screen?.props.dataEntityName ?? ""}:${screen?.props.dataRecordId ?? ""}:${designTokensSignature(tokens)}`;
 
   return (
     <SandpackProvider
@@ -539,7 +598,7 @@ function ScreenSandpack({
       theme={theme}
       files={{
         "/App.js": code,
-        "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme, routeParams),
+        "/index.js": SANDPACK_INDEX_JS_FOR_THEME(theme, initialRouteParams),
         "/tokens.css": buildTokensCss(tokens),
         "/motion.js": designMotionStore.toMotionJs(),
         "/routes.js": routesJs,
@@ -619,4 +678,24 @@ function HidePreviewIcon() {
       <I size={20} ariaHidden />
     </span>
   );
+}
+
+function isMessageSourceInside(
+  root: ParentNode,
+  source: MessageEventSource | null,
+): boolean {
+  if (!source) return false;
+  const iframes = root.querySelectorAll<HTMLIFrameElement>(
+    'iframe[title="Sandpack Preview"]',
+  );
+  for (const iframe of iframes) {
+    if (iframe.contentWindow === source) return true;
+  }
+  return false;
+}
+
+const subscribeNoop = () => () => {};
+
+function useIsClient(): boolean {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false);
 }

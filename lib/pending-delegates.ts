@@ -19,6 +19,7 @@ export type PendingDelegate = {
 
 class PendingDelegatesStore {
   private pending = new Map<string, PendingDelegate>();
+  private listeners = new Set<() => void>();
 
   register(d: PendingDelegate) {
     this.pending.set(d.toolCallId, d);
@@ -34,6 +35,50 @@ class PendingDelegatesStore {
       if (d.toolCallId !== selfToolCallId) out.push(d);
     }
     return out;
+  }
+
+  markClientToolCallObserved() {
+    for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Shared artifacts (components, services, data entities) can be emitted in
+   * the same assistant message as delegateScreen calls. Delegates stream in a
+   * background task, so they wait for a short quiet window across both client
+   * tool-call observation and artifact-ready events before snapshotting project
+   * context; otherwise a service created by a neighboring tool call might miss
+   * the sub-agent prompt.
+   */
+  markProjectArtifactReady() {
+    for (const listener of this.listeners) listener();
+  }
+
+  waitForProjectArtifactQuiet(quietMs = 260, maxWaitMs = 1200): Promise<void> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let quietTimer: ReturnType<typeof setTimeout> | null = null;
+      let maxTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (quietTimer) clearTimeout(quietTimer);
+        if (maxTimer) clearTimeout(maxTimer);
+        this.listeners.delete(onChange);
+        resolve();
+      };
+
+      const armQuietTimer = () => {
+        if (quietTimer) clearTimeout(quietTimer);
+        quietTimer = setTimeout(cleanup, quietMs);
+      };
+
+      const onChange = () => armQuietTimer();
+
+      this.listeners.add(onChange);
+      maxTimer = setTimeout(cleanup, maxWaitMs);
+      armQuietTimer();
+    });
   }
 }
 

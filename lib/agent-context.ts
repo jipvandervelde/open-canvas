@@ -2,11 +2,15 @@ import type { Editor } from "@/lib/editor-shim";
 import type { ScreenShape } from "@/components/ScreenShapeUtil";
 import { VIEWPORT_PRESETS_BY_ID } from "@/lib/viewports";
 import { designTokensStore } from "@/lib/design-tokens-store";
-import { designComponentsStore } from "@/lib/design-components-store";
+import {
+  componentPromptLine,
+  designComponentsStore,
+} from "@/lib/design-components-store";
 import { designServicesStore } from "@/lib/design-services-store";
 import { designMotionStore } from "@/lib/design-motion-store";
 import { designDataStore } from "@/lib/design-data-store";
 import { routeTableStore } from "@/lib/route-table-store";
+import { screenFlowMemoryStore } from "@/lib/screen-flow-memory-store";
 
 /**
  * Build a short "canvas context" string that's injected into each agent turn
@@ -128,12 +132,12 @@ export function buildAgentContext(editor: Editor | null): string {
   const components = designComponentsStore.get();
   if (components.length > 0) {
     lines.push("");
-    lines.push("Shared components (import via `import Name from './components/Name';`):");
+    lines.push("Shared component registry:");
     for (const c of components) {
-      lines.push(`- ${c.name} — ${c.description || "(no description)"}`);
+      lines.push(componentPromptLine(c));
     }
     lines.push(
-      "When a generated screen needs a button, surface, or reusable layout, IMPORT the matching component instead of recreating it inline. Compose them; do not duplicate their markup. You can still inline one-off bespoke elements for things the component library doesn't cover.",
+      "When a generated screen needs a button, surface, nav bar, bottom tab bar, input, switch, segmented control, icon chip, or reusable layout, IMPORT the matching component instead of recreating it inline. Canonical names win over aliases; for bottom tabs use BottomTabBar, not TabBar.",
     );
   }
 
@@ -213,6 +217,15 @@ export function buildAgentContext(editor: Editor | null): string {
     }
     lines.push(
       "When a screen needs navigation to another screen (a tappable card, menu item, back button, call-to-action), use <Link to=\"/path\"> from './services/router'. Do NOT hard-code anchor hrefs to the whole URL — use paths from this table. When a target screen doesn't exist yet but the user described it, CREATE that screen in the same turn (parallel createScreen) so the route table includes it.",
+    );
+  }
+
+  const memoryBlock = screenFlowMemoryStore.toPromptBlock();
+  if (memoryBlock) {
+    lines.push("");
+    lines.push(memoryBlock);
+    lines.push(
+      "Use this structured memory to preserve flow intent across turns. Update it with writeScreenMemory/writeFlowMemory when scope, invariants, open questions, or todos change.",
     );
   }
 

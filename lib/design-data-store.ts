@@ -122,6 +122,7 @@ class DesignDataStore {
 // regenerates automatically. Screens import from it to stay in sync.
 
 export const ${e.name} = ${seedsJson};
+export const ${e.name}Ready = ${e.name}.length > 0;
 
 export function find${e.singular}(id) {
   return ${e.name}.find((item) => String(item.id) === String(id)) || null;
@@ -146,6 +147,9 @@ export function list${e.singular}s() {
     }
     lines.push(
       "Screens that show lists (Home, Favorites, Search) should import these entities and render their items. Screens that show a single item (Detail) should read the id from `useParams()` (services/router) and call `find{Singular}(id)`. NEVER re-inline a parallel hardcoded array for the same entity — the whole point is that all screens see the same data.",
+    );
+    lines.push(
+      "Seed rows may be temporarily empty while the background seed agent finishes. In that case render a loading/empty state from the shared entity; do NOT create fallback domain rows inside a screen.",
     );
     return lines.join("\n");
   }

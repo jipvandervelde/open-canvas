@@ -33,7 +33,10 @@ import {
   type DataField,
 } from "@/lib/design-data-store";
 import {
+  baselineComponentForName,
+  componentPromptLine,
   designComponentsStore,
+  isReservedBaselineComponentName,
   type DesignComponent,
 } from "@/lib/design-components-store";
 import {
@@ -61,6 +64,12 @@ import { streamingStore } from "@/lib/streaming-store";
 import { subAgentCodeStore } from "@/lib/subagent-code-store";
 import { reviewStreamStore } from "@/lib/review-stream-store";
 import { pendingDelegates } from "@/lib/pending-delegates";
+import {
+  deriveFlowMemory,
+  deriveScreenMemory,
+  screenFlowMemoryStore,
+  type FlowMemory,
+} from "@/lib/screen-flow-memory-store";
 import {
   assignAgentName,
   getAgentName,
@@ -419,18 +428,73 @@ function exportedApiSummary(code: string): string {
   return exports.slice(0, 12).join(", ");
 }
 
+function codeContractSummary(code: string, maxLines = 34): string {
+  const lines = code.split("\n");
+  const out: string[] = [];
+  let jsdoc: string[] = [];
+  let captureReturnObject = 0;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (line.startsWith("/**")) {
+      jsdoc = [line];
+      continue;
+    }
+    if (jsdoc.length > 0) {
+      jsdoc.push(line);
+      if (line.endsWith("*/")) {
+        out.push(...jsdoc.slice(0, 8));
+        jsdoc = [];
+      }
+      if (out.length >= maxLines) break;
+      continue;
+    }
+
+    const isExport =
+      /^export\s+/.test(line) ||
+      /^export\s+default\s+function/.test(line);
+    const isHookReturn =
+      /^return\s+\{/.test(line) ||
+      /^return\s+\[/.test(line) ||
+      /^\w+:\s*/.test(line);
+    const isImportantLocal =
+      /^(const|let)\s+\[[^\]]+\]\s*=/.test(line) ||
+      /^const\s+value\s*=/.test(line);
+
+    if (isExport || isImportantLocal || captureReturnObject > 0) {
+      out.push(line);
+      if (/^return\s+\{/.test(line) || /^const\s+value\s*=\s*\(\{\s*$/.test(line)) {
+        captureReturnObject = 6;
+      } else if (captureReturnObject > 0) {
+        captureReturnObject -= 1;
+      }
+    } else if (captureReturnObject > 0 && isHookReturn) {
+      out.push(line);
+      captureReturnObject -= 1;
+    }
+
+    if (out.length >= maxLines) break;
+  }
+
+  return Array.from(new Set(out)).slice(0, maxLines).join("\n");
+}
+
 function buildSubAgentProjectContext(): string {
   const lines: string[] = [];
   const components = designComponentsStore.get();
   const services = designServicesStore.get();
   const entities = designDataStore.get();
   const routes = routeTableStore.get();
+  const memoryBlock = screenFlowMemoryStore.toPromptBlock();
 
   if (
     components.length === 0 &&
     services.length === 0 &&
     entities.length === 0 &&
-    routes.length === 0
+    routes.length === 0 &&
+    !memoryBlock
   ) {
     return "";
   }
@@ -441,12 +505,17 @@ function buildSubAgentProjectContext(): string {
 
   if (components.length > 0) {
     lines.push("");
-    lines.push("Shared components:");
+    lines.push("Shared component registry:");
     for (const c of components) {
-      lines.push(
-        `- import ${c.name} from './components/${c.name}'; — ${c.description || "(no description)"}`,
-      );
+      const contract = codeContractSummary(c.code, 18);
+      lines.push(componentPromptLine(c));
+      if (contract) {
+        lines.push(`  Contract excerpt:\n${contract}`);
+      }
     }
+    lines.push(
+      "If a component's aliases/tags/useWhen match the UI being built, import it and pass props. Do not recreate covered component markup inline. Bottom tab bars specifically use BottomTabBar, not a generated TabBar clone.",
+    );
   }
 
   if (services.length > 0) {
@@ -454,9 +523,13 @@ function buildSubAgentProjectContext(): string {
     lines.push("Shared services:");
     for (const s of services) {
       const api = exportedApiSummary(s.code);
+      const contract = codeContractSummary(s.code, 28);
       lines.push(
         `- ./services/${s.name} — ${s.description || "(no description)"}${api ? ` · exports: ${api}` : ""}`,
       );
+      if (contract) {
+        lines.push(`  Contract excerpt:\n${contract}`);
+      }
     }
     lines.push(
       "If a service owns state or calculations used by multiple screens, import and use it. Do not duplicate that state or hardcode derived values inside this screen.",
@@ -469,8 +542,13 @@ function buildSubAgentProjectContext(): string {
     for (const e of entities) {
       const fields = e.fields.map((f) => `${f.name}:${f.type}`).join(", ");
       lines.push(
-        `- import { ${e.name}, find${e.singular}, list${e.singular}s } from './data/${e.name}'; — ${e.description || "(no description)"} · fields: ${fields} · ${e.seeds.length} seed row${e.seeds.length === 1 ? "" : "s"}`,
+        `- import { ${e.name}, ${e.name}Ready, find${e.singular}, list${e.singular}s } from './data/${e.name}'; — ${e.description || "(no description)"} · fields: ${fields} · ${e.seeds.length} seed row${e.seeds.length === 1 ? "" : "s"}`,
       );
+      if (e.seeds.length === 0) {
+        lines.push(
+          `  ${e.name} is currently empty because seeds are still filling asynchronously. Render a loading/empty state, but do NOT create fallback ${e.name} rows inside the screen.`,
+        );
+      }
     }
     lines.push(
       "Render lists from the shared entity and look up records with find{Singular}(id). Do not inline a second hardcoded copy of the same data.",
@@ -488,7 +566,21 @@ function buildSubAgentProjectContext(): string {
     );
   }
 
+  if (memoryBlock) {
+    lines.push("");
+    lines.push(memoryBlock);
+    lines.push(
+      "Treat memory invariants and todos as current project intent. Do not contradict them without the orchestrator explicitly saying so.",
+    );
+  }
+
   return lines.join("\n");
+}
+
+function rememberScreen(shape: ScreenShape) {
+  screenFlowMemoryStore.upsertScreen(deriveScreenMemory(shape), {
+    preserveCurated: true,
+  });
 }
 
 function numberedSourceExcerpt(code: string, maxLines = 260): string {
@@ -511,6 +603,234 @@ function lineNumbersForNeedle(code: string, needle: string): number[] {
     if (out.length >= 20) break;
   }
   return out;
+}
+
+type ScreenQualityIssue = {
+  severity: "high" | "medium" | "low";
+  category:
+    | "data-flow"
+    | "navigation"
+    | "shared-service"
+    | "shared-component"
+    | "accessibility"
+    | "icon";
+  problem: string;
+  fix: string;
+};
+
+function memoryRequiresSharedService(screenId?: string): boolean {
+  if (!screenId) return false;
+  const memory = screenFlowMemoryStore.get();
+  const screen = memory.screens.find((m) => m.screenId === screenId);
+  const flows = memory.flows.filter((flow) => flow.screenIds.includes(screenId));
+  const text = [
+    ...(screen?.invariants ?? []),
+    ...(screen?.todos ?? []),
+    ...flows.flatMap((flow) => [
+      flow.scope,
+      ...flow.sharedState,
+      ...flow.invariants,
+      ...flow.todos,
+    ]),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return /\b(shared service|shared flow service|services\/|cart|checkout|booking|order state|computed totals?)\b/.test(
+    text,
+  );
+}
+
+function screenQualityIssues(
+  code: string,
+  options: { screenId?: string } = {},
+): ScreenQualityIssue[] {
+  const issues: ScreenQualityIssue[] = [];
+  const lower = code.toLowerCase();
+  const importsService = /from\s+['"]\.\/services\//.test(code);
+  const importsData = /from\s+['"]\.\/data\//.test(code);
+  const importsBottomTabBar =
+    /import\s+BottomTabBar\s+from\s+['"]\.\/components\/BottomTabBar['"]/.test(
+      code,
+    );
+  const importsNavBar =
+    /import\s+NavBar\s+from\s+['"]\.\/components\/NavBar['"]/.test(code);
+  const importsSegmentedControl =
+    /import\s+SegmentedControl\s+from\s+['"]\.\/components\/SegmentedControl['"]/.test(
+      code,
+    );
+  const importsSwitch =
+    /import\s+Switch\s+from\s+['"]\.\/components\/Switch['"]/.test(code);
+  const importsTextField =
+    /import\s+TextField\s+from\s+['"]\.\/components\/TextField['"]/.test(code);
+  const importsLegacyTabBar =
+    /import\s+TabBar\s+from\s+['"]\.\/components\/TabBar['"]/.test(code);
+  const hasTransactionalCopy =
+    /\b(subtotal|tax|delivery fee|service fee|total|order id|payment|visa|cart|checkout|booking)\b/.test(
+      lower,
+    );
+  const hasMoney = /\$\s?\d|\bprice\b|\bamount\b/.test(lower);
+
+  if (hasTransactionalCopy && hasMoney && !importsService) {
+    const stronglyTransactional =
+      /\b(cart|checkout|order id|payment|visa|delivery fee|service fee|tax|subtotal|booking)\b/.test(
+        lower,
+      );
+    const shouldBlock =
+      stronglyTransactional || memoryRequiresSharedService(options.screenId);
+    issues.push({
+      severity: shouldBlock ? "high" : "medium",
+      category: "shared-service",
+      problem:
+        "Transactional values appear in this screen, but the code does not import a shared service. Totals/order state can drift across screens.",
+      fix:
+        shouldBlock
+          ? "Create/import a shared service for cart/order state and render subtotal, fees, tax, total, address, payment, and order id from that service."
+          : "If this screen belongs to a multi-step transactional flow, create/import a shared service for the active state; otherwise keep it as a local mock and record that intent in screen memory.",
+    });
+  }
+
+  if (importsData && /\bconst\s+\w+\s*=\s*\[\s*\{/.test(code)) {
+    issues.push({
+      severity: "medium",
+      category: "data-flow",
+      problem:
+        "The screen imports shared data but also declares an inline object array, which can become a second source of truth.",
+      fix:
+        "Render from the imported data entity only, or move the array into defineDataEntity.",
+    });
+  }
+
+  const routes = new Set(routeTableStore.get().map((r) => r.path));
+  const linkMatches = Array.from(
+    code.matchAll(/<Link\b[^>]*\bto=(?:"([^"]+)"|'([^']+)')/g),
+  );
+  for (const match of linkMatches) {
+    const raw = match[1] ?? match[2] ?? "";
+    const path = raw.split("?")[0];
+    if (path.startsWith("/") && routes.size > 0 && !routes.has(path)) {
+      issues.push({
+        severity: "high",
+        category: "navigation",
+        problem: `Internal Link points to "${path}", but that route is not on the canvas.`,
+        fix:
+          "Use an existing route from the route table, or create the target screen before linking to it.",
+      });
+    }
+  }
+
+  if (/<a\b[^>]*href=(?:"\/|'\/)/.test(code)) {
+    issues.push({
+      severity: "medium",
+      category: "navigation",
+      problem:
+        "The screen uses a raw internal <a href> instead of the router Link service.",
+      fix:
+        "Import { Link } from './services/router' and use <Link to=\"/...\"> for internal navigation.",
+    });
+  }
+
+  const looksLikeInlineBottomTabs =
+    (/<nav\b/.test(code) && /role=["']tablist["']/.test(code) && /bottom:\s*0/.test(code)) ||
+    (/position:\s*['"]fixed['"]/.test(code) &&
+      /bottom:\s*0/.test(code) &&
+      /aria-selected|aria-current/.test(code) &&
+      /Icon[A-Za-z0-9]+/.test(code));
+  if (looksLikeInlineBottomTabs && !importsBottomTabBar) {
+    issues.push({
+      severity: "high",
+      category: "shared-component",
+      problem:
+        "This screen appears to recreate bottom tab bar markup inline instead of importing the canonical BottomTabBar baseline component.",
+      fix:
+        "Import BottomTabBar from './components/BottomTabBar' and pass items, activeKey, and onChange. Keep tab labels/icons/order in one shared component usage pattern.",
+    });
+  }
+
+  if (importsLegacyTabBar && !importsBottomTabBar) {
+    issues.push({
+      severity: "medium",
+      category: "shared-component",
+      problem:
+        "This screen imports the legacy TabBar alias. BottomTabBar is the canonical component name for top-level mobile tabs.",
+      fix:
+        "Replace `import TabBar from './components/TabBar'` with `import BottomTabBar from './components/BottomTabBar'` and render <BottomTabBar ... />.",
+    });
+  }
+
+  if (/<header\b/.test(code) && /role=["']banner["']/.test(code) && !importsNavBar) {
+    issues.push({
+      severity: "medium",
+      category: "shared-component",
+      problem:
+        "This screen appears to recreate a top navigation/header inline instead of importing the baseline NavBar component.",
+      fix:
+        "Import NavBar from './components/NavBar' and pass title, variant, leading, trailing, and secondaryTrailing props.",
+    });
+  }
+
+  const looksLikeSegmentedControl =
+    /role=["']tablist["']/.test(code) &&
+    !/bottom:\s*0/.test(code) &&
+    /aria-selected/.test(code);
+  if (looksLikeSegmentedControl && !importsSegmentedControl) {
+    issues.push({
+      severity: "medium",
+      category: "shared-component",
+      problem:
+        "This screen appears to recreate segmented control markup inline instead of importing the baseline SegmentedControl.",
+      fix:
+        "Import SegmentedControl from './components/SegmentedControl' and pass options, value/defaultValue, and onChange.",
+    });
+  }
+
+  if (/role=["']switch["']/.test(code) && !importsSwitch) {
+    issues.push({
+      severity: "medium",
+      category: "shared-component",
+      problem:
+        "This screen appears to recreate switch/toggle markup inline instead of importing the baseline Switch component.",
+      fix:
+        "Import Switch from './components/Switch' and pass checked/defaultChecked, onChange, label, or ariaLabel.",
+    });
+  }
+
+  if (/<input\b/.test(code) && /placeholder=|aria-invalid|type=["'](?:text|email|password|search)["']/.test(code) && !importsTextField) {
+    issues.push({
+      severity: "low",
+      category: "shared-component",
+      problem:
+        "This screen uses a raw text input where the baseline TextField may provide more consistent label, placeholder, focus, helper, and error styling.",
+      fix:
+        "Prefer importing TextField from './components/TextField' for standard text/email/search/password fields.",
+    });
+  }
+
+  const iconNames = new Set<string>();
+  for (const match of code.matchAll(
+    /\b(?:name|icon|iconName)\s*[:=]\s*["'](Icon[A-Za-z0-9]+)["']/g,
+  )) {
+    iconNames.add(match[1]);
+  }
+  for (const iconName of iconNames) {
+    if (
+      !getIconComponent(iconName, "outlined") &&
+      !getIconComponent(iconName, "filled")
+    ) {
+      issues.push({
+        severity: "high",
+        category: "icon",
+        problem: `Icon "${iconName}" does not exist in the Central Icons registry.`,
+        fix:
+          "Call searchIcons, pick one returned approvedNames value verbatim, and replace the invalid icon name.",
+      });
+    }
+  }
+
+  return issues.slice(0, 6);
+}
+
+function hasBlockingQualityIssue(issues: ScreenQualityIssue[]): boolean {
+  return issues.some((issue) => issue.severity === "high");
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -631,6 +951,7 @@ export function LeftPanel() {
         });
         return;
       }
+      pendingDelegates.markClientToolCallObserved();
 
       try {
         if (toolCall.toolName === "reviewScreen") {
@@ -666,11 +987,14 @@ export function LeftPanel() {
                   screenName: shape.props.name,
                   viewportId: shape.props.viewportId,
                   code: shape.props.code,
+                  memoryContext: screenFlowMemoryStore.toPromptBlock([
+                    String(shape.id),
+                  ]),
                   disabledSkills: skillsUiStore.list(),
                   projectDoc: projectDocStore.get().markdown,
                   designDoc: designDocStore.get().markdown,
                   tokens: designTokensStore.snapshot(),
-              componentTokens: designComponentTokensStore.get(),
+                  componentTokens: designComponentTokensStore.get(),
                   iconStyle: iconStyleStore.snapshot(),
                 }),
                 signal: controller.signal,
@@ -841,6 +1165,105 @@ export function LeftPanel() {
           return;
         }
 
+        if (toolCall.toolName === "reviewFlow") {
+          const args = toolCall.input as { ids: string[] };
+          const screenShapes = args.ids
+            .map((id) => editor.getShape(id as ScreenShape["id"]))
+            .filter((shape): shape is ScreenShape => !!shape && shape.type === "screen");
+	          const screens = screenShapes.map((shape) => ({
+	            id: String(shape.id),
+	            name: shape.props.name,
+	            viewportId: shape.props.viewportId,
+	            code: shape.props.code,
+	          }));
+          if (screens.length < 2) {
+            addToolResult({
+              tool: "reviewFlow",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                error: "reviewFlow requires at least two valid screen ids.",
+              },
+            });
+            return;
+          }
+          try {
+            const res = await fetch("/api/review-flow", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                screens,
+                sharedContext: buildSubAgentProjectContext(),
+                projectDoc: projectDocStore.get().markdown,
+                designDoc: designDocStore.get().markdown,
+                tokens: designTokensStore.snapshot(),
+                componentTokens: designComponentTokensStore.get(),
+                iconStyle: iconStyleStore.snapshot(),
+              }),
+            });
+            const data = (await res.json()) as {
+              ok: boolean;
+              summary?: string;
+              issues?: unknown[];
+              error?: string;
+              usage?: {
+                inputTokens?: number;
+                outputTokens?: number;
+                reasoningTokens?: number;
+                totalTokens?: number;
+              };
+            };
+            if (data.usage) {
+              tokenUsageStore.add(
+                { ...data.usage, source: "review" },
+                `review-flow:${toolCall.toolCallId}`,
+              );
+            }
+            const flowMemory = screenFlowMemoryStore.upsertFlow(
+              {
+                ...deriveFlowMemory(
+                  screens.map((s) => s.name).join(" -> ") || "Generated flow",
+                  screenShapes,
+                ),
+                todos:
+                  data.ok && Array.isArray(data.issues) && data.issues.length > 0
+                    ? data.issues
+                        .map((issue) =>
+                          typeof issue === "object" && issue && "fix" in issue
+                            ? String((issue as { fix?: unknown }).fix ?? "")
+                            : "",
+                        )
+                        .filter(Boolean)
+                        .slice(0, 6)
+                    : [],
+              },
+              { preserveCurated: true },
+            );
+            addToolResult({
+              tool: "reviewFlow",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: data.ok,
+                screenCount: screens.length,
+                summary: data.summary,
+                issues: data.issues ?? [],
+                memory: flowMemory,
+                ...(data.error ? { error: data.error } : {}),
+              },
+            });
+          } catch (err) {
+            addToolResult({
+              tool: "reviewFlow",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                error: String(err),
+              },
+            });
+          }
+          return;
+        }
+
         if (toolCall.toolName === "suggestReplies") {
           // Purely presentational — the chips render from the message
           // part's input. Immediately resolve so the orchestrator can
@@ -954,6 +1377,107 @@ export function LeftPanel() {
           return;
         }
 
+        if (toolCall.toolName === "writeScreenMemory") {
+          const args = toolCall.input as {
+            screenId: string;
+            purpose: string;
+            dependsOn?: string[];
+            shows?: string[];
+            navigation?: string[];
+            invariants?: string[];
+            openQuestions?: string[];
+            todos?: string[];
+          };
+          const shape = editor.getShape(args.screenId as ScreenShape["id"]) as
+            | ScreenShape
+            | undefined;
+          if (!shape || shape.type !== "screen") {
+            addToolResult({
+              tool: "writeScreenMemory",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                error: `No screen with id ${args.screenId} found on canvas`,
+              },
+            });
+            return;
+          }
+          const existing = screenFlowMemoryStore
+            .get()
+            .screens.find((m) => m.screenId === args.screenId);
+          const memory = screenFlowMemoryStore.upsertScreen({
+            ...(existing ?? deriveScreenMemory(shape)),
+            screenId: String(shape.id),
+            screenName: shape.props.name,
+            purpose: args.purpose,
+            dependsOn: args.dependsOn ?? existing?.dependsOn ?? [],
+            shows: args.shows ?? existing?.shows ?? [],
+            navigation: args.navigation ?? existing?.navigation ?? [],
+            invariants: args.invariants ?? existing?.invariants ?? [],
+            openQuestions: args.openQuestions ?? existing?.openQuestions ?? [],
+            todos: args.todos ?? existing?.todos ?? [],
+            updatedAt: existing?.updatedAt ?? 0,
+          });
+          addToolResult({
+            tool: "writeScreenMemory",
+            toolCallId: toolCall.toolCallId,
+            output: { ok: true, memory },
+          });
+          return;
+        }
+
+        if (toolCall.toolName === "writeFlowMemory") {
+          const args = toolCall.input as {
+            title: string;
+            screenIds: string[];
+            scope: string;
+            sharedState?: string[];
+            navigation?: string[];
+            invariants?: string[];
+            outOfScope?: string[];
+            openQuestions?: string[];
+            todos?: string[];
+          };
+          const screens = args.screenIds
+            .map((id) => editor.getShape(id as ScreenShape["id"]))
+            .filter((shape): shape is ScreenShape => !!shape && shape.type === "screen");
+          const base =
+            screens.length > 0
+              ? deriveFlowMemory(args.title, screens)
+              : ({
+                  id: `flow_${args.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+                  title: args.title,
+                  screenIds: args.screenIds,
+                  scope: args.scope,
+                  sharedState: [],
+                  navigation: [],
+                  invariants: [],
+                  outOfScope: [],
+                  openQuestions: [],
+                  todos: [],
+                  updatedAt: 0,
+                } satisfies FlowMemory);
+          const memory = screenFlowMemoryStore.upsertFlow({
+            ...base,
+            title: args.title,
+            screenIds: args.screenIds,
+            scope: args.scope,
+            sharedState: args.sharedState ?? base.sharedState,
+            navigation: args.navigation ?? base.navigation,
+            invariants: args.invariants ?? base.invariants,
+            outOfScope: args.outOfScope ?? base.outOfScope,
+            openQuestions: args.openQuestions ?? base.openQuestions,
+            todos: args.todos ?? base.todos,
+            updatedAt: base.updatedAt,
+          });
+          addToolResult({
+            tool: "writeFlowMemory",
+            toolCallId: toolCall.toolCallId,
+            output: { ok: true, memory },
+          });
+          return;
+        }
+
         if (toolCall.toolName === "readNote") {
           const args = toolCall.input as { id: string };
           const note = projectNotesStore.findById(args.id);
@@ -1035,6 +1559,7 @@ export function LeftPanel() {
             description: args.description,
             code: args.code,
           });
+          pendingDelegates.markProjectArtifactReady();
           addToolResult({
             tool: "createService",
             toolCallId: toolCall.toolCallId,
@@ -1054,6 +1579,11 @@ export function LeftPanel() {
             name: string;
             description: string;
             code: string;
+            aliases?: string[];
+            tags?: string[];
+            useWhen?: string[];
+            avoidWhen?: string[];
+            props?: DesignComponent["props"];
           };
           // Validate PascalCase — prevents /components/foo.js which won't
           // import with the naming convention the sub-agents expect.
@@ -1064,6 +1594,23 @@ export function LeftPanel() {
               output: {
                 ok: false,
                 error: `Component name must be PascalCase (got "${args.name}"). Rename and retry.`,
+              },
+            });
+            return;
+          }
+          if (isReservedBaselineComponentName(args.name)) {
+            const baseline = baselineComponentForName(args.name);
+            const preferredName =
+              args.name === "TabBar" ? "BottomTabBar" : baseline?.name ?? args.name;
+            addToolResult({
+              tool: "createComponent",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                error: `"${args.name}" is a reserved baseline component and must not be recreated or overwritten.`,
+                importPath: `./components/${preferredName}`,
+                hint:
+                  `Use the existing baseline component instead: import ${preferredName} from './components/${preferredName}'; pass props instead of generating a copy.`,
               },
             });
             return;
@@ -1079,7 +1626,14 @@ export function LeftPanel() {
             name: args.name,
             description: args.description,
             code: args.code,
+            aliases: args.aliases,
+            tags: args.tags,
+            useWhen: args.useWhen,
+            avoidWhen: args.avoidWhen,
+            props: args.props,
+            canonical: true,
           });
+          pendingDelegates.markProjectArtifactReady();
           addToolResult({
             tool: "createComponent",
             toolCallId: toolCall.toolCallId,
@@ -1119,6 +1673,7 @@ export function LeftPanel() {
             fields: args.fields,
             seeds: existing?.seeds ?? [],
           });
+          pendingDelegates.markProjectArtifactReady();
 
           const existingCount = existing?.seeds?.length ?? 0;
           const target = Math.max(10, args.rowCount ?? 12);
@@ -1188,6 +1743,7 @@ export function LeftPanel() {
                   ...cur,
                   seeds: Array.from(byId.values()),
                 });
+                pendingDelegates.markProjectArtifactReady();
               } catch {
                 /* best-effort; entity still usable with existing seeds */
               } finally {
@@ -1283,7 +1839,10 @@ export function LeftPanel() {
           // sheet/modal view so the code reflects that (grabber, backdrop,
           // dismiss affordance).
           void (async () => {
-            await new Promise((r) => setTimeout(r, 80));
+            await Promise.all([
+              new Promise((r) => setTimeout(r, 80)),
+              pendingDelegates.waitForProjectArtifactQuiet(),
+            ]);
             const siblingList = pendingDelegates.siblings(toolCall.toolCallId);
             const siblingBlock =
               siblingList.length > 0
@@ -1410,18 +1969,35 @@ export function LeftPanel() {
               id,
               COMPILE_TIMEOUT_MS,
             );
-            if (verdict.kind === "success") {
+            const qualityIssues =
+              verdict.kind === "success"
+                ? screenQualityIssues(finalCode, { screenId: String(id) })
+                : [];
+            const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+            const sheetShape = editor.getShape(id) as ScreenShape | undefined;
+            if (sheetShape?.type === "screen") rememberScreen(sheetShape);
+            if (verdict.kind === "success" && !qualityBlocked) {
               screenErrorLog.clearForScreen(String(id));
             }
             addToolResult({
               tool: "createSheetView",
               toolCallId: toolCall.toolCallId,
               output: {
-                ok: verdict.kind === "success",
+                ok: verdict.kind === "success" && !qualityBlocked,
                 id,
                 parentScreenId: String(parent.id),
                 parentName: parent.props.name,
                 status: verdict.kind,
+                qualityIssues,
+                ...(qualityBlocked
+                  ? {
+                      error:
+                        "Screen compiled, but failed behavior/data-flow quality checks.",
+                      code: finalCode,
+                      hint:
+                        "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                    }
+                  : {}),
               },
             });
           })();
@@ -1512,7 +2088,10 @@ export function LeftPanel() {
             // assistant message have a chance to register themselves before
             // we snapshot the sibling list. 80ms covers the gap between AI
             // SDK firing consecutive onToolCall invocations comfortably.
-            await new Promise((r) => setTimeout(r, 80));
+            await Promise.all([
+              new Promise((r) => setTimeout(r, 80)),
+              pendingDelegates.waitForProjectArtifactQuiet(),
+            ]);
             const siblingList = pendingDelegates.siblings(toolCall.toolCallId);
             const siblingBlock =
               siblingList.length > 0
@@ -1641,14 +2220,21 @@ export function LeftPanel() {
               id,
               COMPILE_TIMEOUT_MS,
             );
-            if (verdict.kind === "success") {
+            const qualityIssues =
+              verdict.kind === "success"
+                ? screenQualityIssues(finalCode, { screenId: String(id) })
+                : [];
+            const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+            const delegatedShape = editor.getShape(id) as ScreenShape | undefined;
+            if (delegatedShape?.type === "screen") rememberScreen(delegatedShape);
+            if (verdict.kind === "success" && !qualityBlocked) {
               screenErrorLog.clearForScreen(String(id));
               planStore.advanceFromScreenOp({
                 screenId: String(id),
                 screenName: args.name,
                 status: "complete",
               });
-            } else if (verdict.kind === "error") {
+            } else if (verdict.kind === "error" || qualityBlocked) {
               planStore.advanceFromScreenOp({
                 screenId: String(id),
                 screenName: args.name,
@@ -1659,12 +2245,22 @@ export function LeftPanel() {
               tool: "delegateScreen",
               toolCallId: toolCall.toolCallId,
               output: {
-                ok: verdict.kind === "success",
+                ok: verdict.kind === "success" && !qualityBlocked,
                 id,
                 status: verdict.kind,
                 totalLines: finalCode.split("\n").length,
+                qualityIssues,
                 ...(verdict.kind === "error"
                   ? { error: verdict.message, code: finalCode }
+                  : {}),
+                ...(qualityBlocked
+                  ? {
+                      error:
+                        "Screen compiled, but failed behavior/data-flow quality checks.",
+                      code: finalCode,
+                      hint:
+                        "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                    }
                   : {}),
               },
             });
@@ -1781,7 +2377,15 @@ export function LeftPanel() {
             return;
           }
 
-          if (verdict.kind === "success") {
+          const qualityIssues =
+            verdict.kind === "success"
+              ? screenQualityIssues(finalCode, { screenId: String(id) })
+              : [];
+          const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+          const createdShape = editor.getShape(id) as ScreenShape | undefined;
+          if (createdShape?.type === "screen") rememberScreen(createdShape);
+
+          if (verdict.kind === "success" && !qualityBlocked) {
             // The final render compiled cleanly; any transient errors logged
             // while partial code was streaming in are now stale.
             screenErrorLog.clearForScreen(id);
@@ -1801,12 +2405,22 @@ export function LeftPanel() {
             tool: "createScreen",
             toolCallId: toolCall.toolCallId,
             output: {
-              ok: verdict.kind === "success",
+              ok: verdict.kind === "success" && !qualityBlocked,
               id,
               status: verdict.kind,
               totalLines: finalCode.split("\n").length,
+              qualityIssues,
               ...(verdict.kind === "pending"
                 ? { error: "Compile did not complete within timeout" }
+                : {}),
+              ...(qualityBlocked
+                ? {
+                    error:
+                      "Screen compiled, but failed behavior/data-flow quality checks.",
+                    code: finalCode,
+                    hint:
+                      "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                  }
                 : {}),
             },
           });
@@ -1894,7 +2508,33 @@ export function LeftPanel() {
                 });
                 return;
               }
+              const qualityIssues = screenQualityIssues(props.code, {
+                screenId: String(targetId),
+              });
+              const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+              if (qualityBlocked) {
+                addToolResult({
+                  tool: "updateScreen",
+                  toolCallId: toolCall.toolCallId,
+                  output: {
+                    ok: false,
+                    id: targetId,
+                    status: cur?.kind ?? "success",
+                    qualityIssues,
+                    code: props.code,
+                    error:
+                      "Screen compiled, but failed behavior/data-flow quality checks.",
+                    hint:
+                      "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                  },
+                });
+                return;
+              }
               screenErrorLog.clearForScreen(String(targetId));
+              const unchangedShape = editor.getShape(targetId) as
+                | ScreenShape
+                | undefined;
+              if (unchangedShape?.type === "screen") rememberScreen(unchangedShape);
               planStore.advanceFromScreenOp({
                 screenId: String(targetId),
                 screenName: (shape as ScreenShape).props.name,
@@ -1936,7 +2576,17 @@ export function LeftPanel() {
               return;
             }
 
-            if (verdict.kind === "success") {
+            const qualityIssues =
+              verdict.kind === "success"
+                ? screenQualityIssues(props.code, { screenId: String(targetId) })
+                : [];
+            const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+            const updatedShape = editor.getShape(targetId) as
+              | ScreenShape
+              | undefined;
+            if (updatedShape?.type === "screen") rememberScreen(updatedShape);
+
+            if (verdict.kind === "success" && !qualityBlocked) {
               screenErrorLog.clearForScreen(String(targetId));
               planStore.advanceFromScreenOp({
                 screenId: String(targetId),
@@ -1954,14 +2604,24 @@ export function LeftPanel() {
               tool: "updateScreen",
               toolCallId: toolCall.toolCallId,
               output: {
-                ok: verdict.kind === "success",
+                ok: verdict.kind === "success" && !qualityBlocked,
                 id: targetId,
                 status: verdict.kind,
                 linesAdded: diff.added,
                 linesRemoved: diff.removed,
                 totalLines,
+                qualityIssues,
                 ...(verdict.kind === "pending"
                   ? { error: "Compile did not complete within timeout" }
+                  : {}),
+                ...(qualityBlocked
+                  ? {
+                      error:
+                        "Screen compiled, but failed behavior/data-flow quality checks.",
+                      code: props.code,
+                      hint:
+                        "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                    }
                   : {}),
               },
             });
@@ -1969,6 +2629,12 @@ export function LeftPanel() {
           }
 
           screenErrorLog.clearForScreen(String(targetId));
+          const metadataUpdatedShape = editor.getShape(targetId) as
+            | ScreenShape
+            | undefined;
+          if (metadataUpdatedShape?.type === "screen") {
+            rememberScreen(metadataUpdatedShape);
+          }
           planStore.advanceFromScreenOp({
             screenId: String(targetId),
             screenName: (shape as ScreenShape).props.name,
@@ -2120,7 +2786,14 @@ export function LeftPanel() {
             targetId,
             COMPILE_TIMEOUT_MS,
           );
-          if (verdict.kind === "success") {
+          const qualityIssues =
+            verdict.kind === "success"
+              ? screenQualityIssues(next, { screenId: String(targetId) })
+              : [];
+          const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+          const editedShape = editor.getShape(targetId) as ScreenShape | undefined;
+          if (editedShape?.type === "screen") rememberScreen(editedShape);
+          if (verdict.kind === "success" && !qualityBlocked) {
             screenErrorLog.clearForScreen(String(targetId));
             planStore.advanceFromScreenOp({
               screenId: String(targetId),
@@ -2132,15 +2805,175 @@ export function LeftPanel() {
             tool: "editScreen",
             toolCallId: toolCall.toolCallId,
             output: {
-              ok: verdict.kind === "success",
+              ok: verdict.kind === "success" && !qualityBlocked,
               id: targetId,
               status: verdict.kind,
               editsApplied: args.edits.length,
               linesAdded: diff.added,
               linesRemoved: diff.removed,
               totalLines: next.split("\n").length,
+              qualityIssues,
               ...(verdict.kind === "error"
                 ? { error: verdict.message, code: next }
+                : {}),
+              ...(qualityBlocked
+                ? {
+                    error:
+                      "Screen compiled, but failed behavior/data-flow quality checks.",
+                    code: next,
+                    hint:
+                      "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                  }
+                : {}),
+            },
+          });
+          return;
+        }
+
+        if (toolCall.toolName === "getScreenSource") {
+          const args = toolCall.input as { id: string; maxLines?: number };
+          const targetId = args.id as ScreenShape["id"];
+          const shape = editor.getShape(targetId) as ScreenShape | undefined;
+          if (!shape || shape.type !== "screen") {
+            addToolResult({
+              tool: "getScreenSource",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                id: args.id,
+                error: `No screen with id ${args.id} found on canvas`,
+              },
+            });
+            return;
+          }
+          const maxLines = Math.max(20, Math.min(args.maxLines ?? 320, 600));
+          addToolResult({
+            tool: "getScreenSource",
+            toolCallId: toolCall.toolCallId,
+            output: {
+              ok: true,
+              id: targetId,
+              screenName: shape.props.name,
+              totalLines: shape.props.code.split("\n").length,
+              numberedSource: numberedSourceExcerpt(shape.props.code, maxLines),
+            },
+          });
+          return;
+        }
+
+        if (toolCall.toolName === "editScreenLineRange") {
+          const args = toolCall.input as {
+            id: string;
+            startLine: number;
+            endLine: number;
+            newText: string;
+          };
+          const targetId = args.id as ScreenShape["id"];
+          const shape = editor.getShape(targetId) as ScreenShape | undefined;
+          if (!shape || shape.type !== "screen") {
+            addToolResult({
+              tool: "editScreenLineRange",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                id: args.id,
+                error: `No screen with id ${args.id} found on canvas`,
+              },
+            });
+            return;
+          }
+          const lines = shape.props.code.split("\n");
+          if (
+            args.startLine < 1 ||
+            args.endLine < args.startLine ||
+            args.endLine > lines.length
+          ) {
+            addToolResult({
+              tool: "editScreenLineRange",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: false,
+                id: args.id,
+                error: `Invalid line range ${args.startLine}-${args.endLine}; source has ${lines.length} lines.`,
+                sourceSnapshot: numberedSourceExcerpt(shape.props.code),
+              },
+            });
+            return;
+          }
+
+          const replacement =
+            args.newText.length > 0 ? args.newText.split("\n") : [];
+          const next = [
+            ...lines.slice(0, args.startLine - 1),
+            ...replacement,
+            ...lines.slice(args.endLine),
+          ].join("\n");
+          const prevCode = shape.props.code;
+          if (next === prevCode) {
+            addToolResult({
+              tool: "editScreenLineRange",
+              toolCallId: toolCall.toolCallId,
+              output: {
+                ok: true,
+                id: targetId,
+                status: "success",
+                noop: true,
+                totalLines: lines.length,
+              },
+            });
+            return;
+          }
+
+          const diff = lineDiff(prevCode, next);
+          screenStatusStore.bumpVersion(targetId);
+          editor.updateShape({
+            id: targetId,
+            type: "screen",
+            props: { code: next },
+          });
+          const verdict = await screenStatusStore.waitForCompletion(
+            targetId,
+            COMPILE_TIMEOUT_MS,
+          );
+          const qualityIssues =
+            verdict.kind === "success"
+              ? screenQualityIssues(next, { screenId: String(targetId) })
+              : [];
+          const qualityBlocked = hasBlockingQualityIssue(qualityIssues);
+          const rangeEditedShape = editor.getShape(targetId) as
+            | ScreenShape
+            | undefined;
+          if (rangeEditedShape?.type === "screen") rememberScreen(rangeEditedShape);
+          if (verdict.kind === "success" && !qualityBlocked) {
+            screenErrorLog.clearForScreen(String(targetId));
+            planStore.advanceFromScreenOp({
+              screenId: String(targetId),
+              screenName: shape.props.name,
+              status: "complete",
+            });
+          }
+          addToolResult({
+            tool: "editScreenLineRange",
+            toolCallId: toolCall.toolCallId,
+            output: {
+              ok: verdict.kind === "success" && !qualityBlocked,
+              id: targetId,
+              status: verdict.kind,
+              linesAdded: diff.added,
+              linesRemoved: diff.removed,
+              totalLines: next.split("\n").length,
+              qualityIssues,
+              ...(verdict.kind === "error"
+                ? { error: verdict.message, code: next }
+                : {}),
+              ...(qualityBlocked
+                ? {
+                    error:
+                      "Screen compiled, but failed behavior/data-flow quality checks.",
+                    code: next,
+                    hint:
+                      "Fix the high-severity qualityIssues and call updateScreen with the corrected code.",
+                  }
                 : {}),
             },
           });

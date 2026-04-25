@@ -94,6 +94,7 @@ export async function POST(req: Request) {
     screenName,
     viewportId,
     code,
+    memoryContext,
     focus,
     brief,
     hint,
@@ -106,6 +107,7 @@ export async function POST(req: Request) {
     screenName: string;
     viewportId: string;
     code: string;
+    memoryContext?: string;
     focus: string;
     brief?: string;
     hint?: string;
@@ -151,11 +153,13 @@ Rules:
 - Max 4 issues. Be picky, not exhaustive. Surface the WORST offenders only.
 - If the screen is clean for ${rubric.title}, return an empty issues array.
 - Every fix must be a concrete one-liner, not "improve X".
+- Treat structured screen/flow memory as intended behavior. Flag contradictions against memory invariants, todos, and shared-state contracts within your focus area.
 - Do NOT flag issues outside the ${rubric.title} focus area.`;
 
   const prompt = `Screen: ${screenName}
 Viewport: ${viewportId}
 ${brief ? `\nBuilder brief:\n${brief}\n` : ""}
+${memoryContext ? `\nStructured screen/flow memory:\n${memoryContext}\n` : ""}
 ${hint ? `\nScout hint for this focused pass:\n${hint}\n` : ""}
 
 --- /App.js ---

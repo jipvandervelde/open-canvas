@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import "dialkit/styles.css";
 import { ThemeApplier } from "@/components/ThemeApplier";
@@ -44,8 +45,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        <script
+        <Script
           id="oc-theme-boot"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: themeBootScript }}
         />
         <ThemeApplier />

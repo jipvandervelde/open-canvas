@@ -216,6 +216,7 @@ export async function POST(req: Request) {
     screenName,
     viewportId,
     code,
+    memoryContext,
     brief,
     disabledSkills,
     projectDoc,
@@ -227,6 +228,7 @@ export async function POST(req: Request) {
     screenName: string;
     viewportId: string;
     code: string;
+    memoryContext?: string;
     brief?: string;
     disabledSkills?: string[];
     projectDoc?: string;
@@ -275,6 +277,7 @@ export async function POST(req: Request) {
           const scoutPrompt = `Screen name: ${screenName}
 Viewport: ${viewportId}
 ${brief ? `\nBuilder brief:\n${brief}\n` : ""}
+${memoryContext ? `\nStructured screen/flow memory:\n${memoryContext}\n` : ""}
 
 --- /App.js ---
 ${code}
@@ -330,6 +333,7 @@ Choose the focused review lanes now.`;
                     screenName,
                     viewportId,
                     code,
+                    memoryContext,
                     focus,
                     brief,
                     hint: reason,

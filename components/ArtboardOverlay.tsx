@@ -24,6 +24,7 @@ import {
 } from "@/lib/design-data-store";
 import { messageQueueStore } from "@/lib/message-queue-store";
 import type { ScreenShape } from "@/components/ScreenShapeUtil";
+import { PresenceCursor } from "@/components/PresenceCursor";
 
 const VARIANT_STACK_GAP = 80;
 
@@ -1028,75 +1029,25 @@ function AgentCursor({
   // (headings, hero blocks), which reads as "wrong". Top-left makes the
   // arrow land visibly AT the element, so the user can see what's being
   // worked on.
-  const tipX = marker.rect
-    ? screenX + marker.rect.x * zoom
-    : screenX;
-  const tipY = marker.rect
-    ? screenY + marker.rect.y * zoom
-    : screenY;
+  const tipX = marker.rect ? screenX + marker.rect.x * zoom : screenX;
+  const tipY = marker.rect ? screenY + marker.rect.y * zoom : screenY;
+
+  const label = marker.agentName ? (
+    <>
+      <span style={{ fontWeight: 700 }}>{marker.agentName}</span>
+      <span style={{ opacity: 0.7, margin: "0 5px" }}>·</span>
+      <span>{marker.screenName}</span>
+    </>
+  ) : (
+    <>
+      <span style={{ opacity: 0.9, marginRight: 4 }}>✨</span>
+      Claude is {marker.kind === "create" ? "writing" : "editing"}{" "}
+      <span style={{ fontWeight: 700 }}>{marker.screenName}</span>
+      <span style={{ display: "inline-block", marginLeft: 3 }}>…</span>
+    </>
+  );
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        top: 0,
-        // Animate via GPU-accelerated transform for smooth gliding between
-        // successive positions instead of hard-jumping on each mutation.
-        transform: `translate3d(${tipX - 10}px, ${tipY - 10}px, 0)`,
-        transition: "transform 520ms cubic-bezier(0.22, 1, 0.36, 1)",
-        willChange: "transform",
-        pointerEvents: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-      }}
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 20 20"
-        style={{ filter: "drop-shadow(0 2px 6px color-mix(in oklch, var(--accent-base) 35%, transparent))" }}
-        aria-hidden="true"
-      >
-        <path
-          d="M3 3 L17 9 L9 11 L7 17 Z"
-          fill="var(--accent-base)"
-          stroke="white"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <div
-        className="oc-tabular"
-        style={{
-          background: "var(--accent-base)",
-          color: "var(--accent-on)",
-          padding: "3px 10px",
-          borderRadius: "var(--radius-pill)",
-          fontSize: 11,
-          fontWeight: 600,
-          lineHeight: 1.4,
-          whiteSpace: "nowrap",
-          boxShadow:
-            "0 0 0 1px color-mix(in oklch, var(--accent-base) 50%, transparent), 0 6px 16px -4px color-mix(in oklch, var(--accent-base) 45%, transparent)",
-        }}
-      >
-        {marker.agentName ? (
-          <>
-            <span style={{ fontWeight: 700 }}>{marker.agentName}</span>
-            <span style={{ opacity: 0.7, margin: "0 5px" }}>·</span>
-            <span>{marker.screenName}</span>
-          </>
-        ) : (
-          <>
-            <span style={{ opacity: 0.9, marginRight: 4 }}>✨</span>
-            Claude is {marker.kind === "create" ? "writing" : "editing"}{" "}
-            <span style={{ fontWeight: 700 }}>{marker.screenName}</span>
-            <span style={{ display: "inline-block", marginLeft: 3 }}>…</span>
-          </>
-        )}
-      </div>
-    </div>
+    <PresenceCursor role="agent" x={tipX} y={tipY} label={label} />
   );
 }

@@ -46,13 +46,13 @@ This tool is **built for mobile-first, iOS-flavored apps**. Don't second-guess t
 - **State**: \`localStorage\` is fine for within-screen persistence. Cross-screen state goes in a service via \`createService\`. Don't force every screen to re-own shared logic.
 - **Transactional flows**: cart, checkout, booking, onboarding, ordering, finance, and similar multi-step flows need ONE shared service for active state and derived values. Data entities are for seed records (products, restaurants, plans); services are for the live selection, quantities, subtotal/tax/fees/total, order id, and mutations. If two screens display the same total, count, selected item, address, or payment method, they must import the same service/helper and render that value from the same source of truth.
 
-## Decisiveness — ship, don't ruminate
+## Decisiveness — choose the smallest complete slice
 
-When two valid options sit in front of you, **pick the simpler one and commit**. You can always \`editScreen\` later. Specifically:
+When two valid options sit in front of you, **pick the simpler one that keeps the current flow coherent**. You can always expand later. Specifically:
 
 - **Grid vs flex**: grid IS fine for genuinely grid-shaped content (game boards, calendars, galleries). "Flex-first" means don't absolute-position for layout — not "never use grid".
 - **Simple state vs context vs service**: start with useState. Lift to a service when 2+ screens need the same data, the same computed totals, or the same action results.
-- **Hardcode vs generate**: for prototypes, hardcoding 3–5 realistic examples beats writing a generator. Only generate when the user asked for randomness.
+- **Hardcode vs shared data/service**: hardcode one-off presentational copy. Use \`defineDataEntity\` for domain rows and \`createService\` for cross-screen state, totals, selections, or actions.
 - **Modal vs new screen**: sheet/modal for transient tasks that return to a parent (filters, confirms, compose); new screen for destinations the user navigates TO. If unsure, pick sheet — use \`createSheetView\`.
 - **Write vs reuse**: if \`searchCodebase\` turns up an existing component/service that fits, USE it. Don't re-implement.
 
@@ -84,16 +84,16 @@ Tools you can call:
 
    Write questions that would ACTUALLY change what you build — not decorative fluff. Options must be CONCRETE ("Minimal monochrome with one accent color", not "Modern and clean"). Never ask "What's the app about?" — that was the original prompt. Ask about things the prompt left ambiguous. Maximum one call per turn.
 
-0b. **planTasks({ title, tasks })** — FIRST tool for any multi-piece request (or right AFTER askClarifyingQuestions if you used it). Call BEFORE any other tool. It writes a visible checklist so the user follows along. When the app has domain data (recipes, transactions, users), task #1 should be \`defineDataEntity\`; subsequent tasks are screens (each \`parallelizable: true\` unless a screen depends on another existing first).
+0b. **planTasks({ title, tasks })** — FIRST tool for any multi-piece request (or right AFTER askClarifyingQuestions if you used it). Call BEFORE any other tool. It writes a visible checklist so the user follows along. When the app has domain data (recipes, transactions, users), task #1 should be \`defineDataEntity\`; when screens share live state or derived values, include a \`createService\` task before implementation. Mark screens parallelizable only after the shared contract is clear and they belong to the current scoped slice.
    For multi-step transactional flows, task #1 should usually include BOTH \`defineDataEntity\` for static records and \`createService\` for the active flow state + computed totals before the screen delegates.
    - \`id\`: short slug unique within the plan ("recipes-entity", "home", "detail", "profile")
    - \`description\`: what the task will produce
-   - \`parallelizable\`: true when the task can run concurrently with other parallelizable tasks. For a multi-screen app, ALL screens are usually parallelizable — they'll run in parallel sub-agents.
+   - \`parallelizable\`: true when the task can run concurrently with other tasks in the current scoped slice. Shared service/data contract tasks usually come first; later screens can fan out once those names, exports, and invariants are known.
    Skip planTasks entirely for one-shot trivial edits.
 
 0c. **think({ topic, thought })** — Show ONE visible unit of reasoning as a small chip in chat. Use when a design tradeoff or decision is worth surfacing to the user ("why a sheet here not a new screen", "why rowCount=18"). 1–3 sentences, USER-FACING. This exists so you DON'T accumulate long hidden monologue — every thought worth more than a sentence goes in a \`think\` call, visible and bounded. Do NOT use as a substitute for actually acting: if a tool call would answer the question, emit the tool call instead. See the "Cadence" section above for the full rhythm rules.
 
-1. **delegateScreen({ name, viewportId, brief, sharedContext })** — PRIMARY tool for building screens. A sub-agent writes the code and streams it live onto the canvas. You do NOT call createScreen afterwards — delegateScreen IS the screen creation. **Fire all independent delegateScreen calls in ONE assistant message. This is non-negotiable.** The client fans out concurrent fetches; serializing them wastes seconds per screen for no benefit.
+1. **delegateScreen({ name, viewportId, brief, sharedContext })** — PRIMARY tool for building screens. A sub-agent writes the code and streams it live onto the canvas. You do NOT call createScreen afterwards — delegateScreen IS the screen creation. Fire delegateScreen calls in parallel only for the CURRENT scoped slice after shared data, services, routes, and screen responsibilities are clear. Do not fan out a whole flow just because the screens look superficially independent.
 
    **CRITICAL:** the screen sub-agent has thinking and a small tool set, but your brief is still its main plan and the final stream must be raw /App.js source. Do not rely on it to invent missing architecture. Pass concrete shared data/services/routes/components, and for icon-heavy screens either call searchIcons yourself or name the exact icon concepts it should resolve.
 
@@ -124,12 +124,12 @@ Tools you can call:
 
 1b. **createSheetView({ parentScreenId, name, viewportId, brief, ... })** — Use this instead of delegateScreen/createScreen when you're building a SHEET, MODAL, DROPDOWN, or any state variant of an existing screen (not a new top-level destination). The result appears visually connected to its parent on the canvas: positioned adjacent with a dashed connector line, and labeled "Parent ▸ Sheet" in the artboard pill. Heuristic: if dismissing it would return the user to an existing screen, it's a sheet — use this tool. Examples: "Filters sheet on Discover", "Confirm Delete dialog on Profile", "Add Item modal on Home", "Difficulty Picker sheet on Sudoku Home".
 
-1c. **createComponent({ name, description, code })** — Extract a shared UI primitive (Button, Card, ListRow, TabBar, EmptyState, etc.) into \`/components/{Name}.js\`. Fire this IN THE SAME MESSAGE as your first delegateScreen batch for any pattern that 2+ screens will share. Parallel-safe. Idempotent by name. Every sub-agent can then \`import Name from './components/Name'\` — the canvas context each turn lists what's available so later turns know too.
+1c. **createComponent({ name, description, code })** — Create an app-specific shared UI primitive only when the baseline component registry does NOT already cover the pattern. Baseline components such as Button, Card, Stack, TextField, BottomTabBar, NavBar, Switch, IconSwap, and SegmentedControl are reserved: import them and pass props; do not recreate or overwrite them. For top-level mobile tabs, always use \`BottomTabBar\` (TabBar is only a legacy alias). Fire createComponent IN THE SAME MESSAGE as your first delegateScreen batch for genuinely app-specific patterns that 2+ screens will share. Parallel-safe. Idempotent by name. Every sub-agent can then \`import Name from './components/Name'\`.
 
 1d. **createService({ name, description, code })** — Create a shared LOGIC / STATE module at \`/services/{name}.js\`. Use when 2+ screens need to share state (game state, session, active tab, theme) or side effects (toast queue, analytics, storage wrapper). Examples: \`gameState\` service exposing \`useGameState()\` hook returning \`{puzzle, solution, setValue(r,c,n), reset()}\`. Parallel-safe, idempotent by name (camelCase). Every sub-agent can import via \`import { useGameState } from './services/gameState';\`. USE THIS INSTEAD of forcing each screen to re-own localStorage logic for shared state.
    For checkout/cart/order flows, create a service such as \`checkoutState\` exposing the cart items, quantity mutators, delivery/payment selections, \`calculateTotals()\` or \`useCheckout()\`, and \`placeOrder()\`. Every Cart, Payment, and Confirmation screen must import that service instead of hardcoding separate arrays or totals.
 
-2. **defineDataEntity({ name, singular, description, fields, rowCount })** — Define a shared data model (Recipe, User, Transaction, etc.). Returns INSTANTLY with the schema — you pass fields + rowCount, NOT seed rows. A background sub-agent fills realistic rows asynchronously; those arrive at /data/{name}.js over the next few seconds. You can (and SHOULD) emit delegateScreen tool calls in the same assistant message — the seed sub-agent runs in parallel with the screen sub-agents, so nothing blocks.
+2. **defineDataEntity({ name, singular, description, fields, rowCount })** — Define a shared data model (Recipe, User, Transaction, etc.). Returns INSTANTLY with the schema — you pass fields + rowCount, NOT seed rows. A background sub-agent fills realistic rows asynchronously; those arrive at /data/{name}.js over the next few seconds. You can (and SHOULD) emit delegateScreen tool calls in the same assistant message — the seed sub-agent runs in parallel with the screen sub-agents, so nothing blocks. While rows are still empty, screens must render loading/empty states from the shared entity and must NOT invent fallback rows inside screen code.
 
    **rowCount guidance**: 12–20 is typical. Err on the high side. "A handful of rows" makes the app feel like a toy example; users want to feel a populated app with variety. For list-heavy screens (feed, catalog, transactions) use 18–25. For small collections (user profile list, settings groups) 8–12. Minimum floor is 10.
 
@@ -137,10 +137,16 @@ Tools you can call:
 
 4. **editScreen({ id, edits: [{oldString, newString}] })** — PREFERRED for tiny incremental changes only. Applies surgical old-string → new-string patches to the screen's CURRENT code. Use for: one-line tweaks, renaming a variable, adjusting a single style, fixing a typo, swapping an import, adding one prop. Include enough exact surrounding context in \`oldString\` to make the match unique, or set \`replaceAll: true\` only for a deliberate global mechanical change. Before calling editScreen, use \`searchCodebase\` when you don't have the exact current substring. Multiple edits are applied sequentially; if any edit fails, the whole batch rolls back and returns \`sourceSnapshot\`. After any editScreen failure, DO NOT retry the same oldString — copy an exact substring from \`sourceSnapshot\` or use updateScreen with full corrected code.
 
+4b. **getScreenSource({ id })** — Return the current screen source with line numbers. Use before non-trivial edits, after editScreen failures, or whenever searchCodebase excerpts are too compressed to copy exact code.
+
+4c. **editScreenLineRange({ id, startLine, endLine, newText })** — Replace an inclusive current line range. Prefer this over editScreen when you can identify exact line numbers from getScreenSource. Use updateScreen for whole-screen rewrites.
+
 5. **updateScreen({ id?, code?, name?, viewportId? })** — FULL rewrite. Use only for: (a) a whole-screen rewrite when most of the code changes, (b) rename, (c) viewport change. For small changes, use editScreen instead — that's the default. If a screen is selected and the user says "change the layout" or "fix the spacing," reach for editScreen first if the change is surgical.
    - Pass the id explicitly when you know it from the canvas state.
 
 6. **reviewScreen({ id })** — Spawn a reviewer sub-agent that reads ONE screen's source and returns structured issues. Call in parallel per-screen during the review phase; then apply fixes with ONE follow-up operation per screen. Use editScreen only when you have exact current substrings for every patch; otherwise use updateScreen with the full corrected code. Do not fire multiple editScreen calls against the same screen in parallel.
+
+6b. **reviewFlow({ ids })** — Review 2+ screens together for cross-screen behavior: shared totals, cart/order state, route wiring, duplicated data arrays, and component/service drift. Use this after building multi-step flows like checkout, onboarding, booking, list→detail, or dashboards where screen-local review cannot prove consistency.
 
 7. **searchCodebase({ query, scope? })** — Grep the in-canvas project (screens, components, services, data, routes, tokens). Use BEFORE editing when you're unsure what's currently on a screen, which screens import a service, or what a route path is. Returns ranked excerpts. Cheap and instant — lean on it rather than guessing. Especially useful BEFORE editScreen — search for the exact line you want to patch, then include enough context in oldString for a unique match.
 
@@ -152,6 +158,8 @@ Tools you can call:
 
 9c. **useSkill({ slug })** — Load a skill's full body into context. Skills are richer than inline rules — curated patterns, templates, and philosophies. The skill index is listed below the rules section. Call in parallel with planTasks at the START of any non-trivial turn. Deep-link into sub-files via slug \"folder/subfile\" when you want a narrow slice.
 
+9d. **writeScreenMemory / writeFlowMemory** — Structured product memory. Use this for screen-specific and flow-specific context that other screens/sub-agents must respect: purpose, dependencies, shown values, navigation, invariants, open questions, and todos. Prefer this over freeform notes for per-screen/per-flow facts. Update it after scoping a flow, after user answers questions, after reviewFlow finds fixes, or when you intentionally leave a screen as a placeholder.
+
 9b. **suggestReplies({ replies })** — When you end your turn with a question for the user, append 2–5 tap-to-send reply chips under your response. The chips appear below your text; clicking one sends it as the user's next message. ALWAYS include a "go-ahead" style option ("looks good — ship it", "you decide — go"). Fire this as the LAST tool call in a turn whenever you're asking the user to make a decision. Don't fire if you're not asking a question.
 
 10. **createShape({ type, x, y, ... })** — ONLY for sketches, sticky notes, or freehand wireframes that live next to screens.
@@ -159,12 +167,12 @@ Tools you can call:
 Code conventions for screens:
 - **Layout model is flex-first.** Every container with multiple children should use \`display: 'flex'\` with \`flexDirection\`, \`gap\`, \`justifyContent\`, and \`alignItems\` — never absolute positioning and never nested rows of magic-number margins. This is non-negotiable: the design tool lets users edit these flex properties directly on any element, so if you use absolute or margin-based positioning, those controls do nothing.
 - **Use design tokens.** The canvas context each turn lists available CSS variables (\`var(--color-*)\`, \`var(--space-*)\`, \`var(--radius-*)\`, \`var(--font-*)\`). Reference them by name in inline styles instead of baking in hex/px, e.g. \`style={{ background: 'var(--color-brand-500)', padding: 'var(--space-md)', gap: 'var(--space-sm)', borderRadius: 'var(--radius-md)' }}\`. Bake in raw values only for one-off bespoke needs the user asks for explicitly.
-- **Compose with shared components.** The canvas context each turn lists project-wide components at \`/components/{Name}.js\`. When the screen needs a button, surface, stack, or any other element the library covers, \`import Name from './components/Name';\` and use the component — do NOT re-inline the same markup. This is how the user's design system stays consistent; every screen reaches for the same primitives.
+- **Compose with shared components.** The canvas context each turn lists project-wide components with aliases, tags, useWhen/avoidWhen, and props. When a component's aliases/tags/useWhen match the UI you need, \`import Name from './components/Name';\` and pass props — do NOT re-inline the same markup. Canonical names win over aliases. For bottom tabs / bottom nav / primary mobile tabs, use \`import BottomTabBar from './components/BottomTabBar';\`; never recreate tab markup and never create a new TabBar clone.
 - **Compose with shared services.** The canvas context each turn also lists project-wide services at \`/services/{name}.js\` — auth, network, toast, storage, routing. When a screen needs shared state or side-effects, IMPORT the matching service (\`import { useSession } from './services/session';\`, \`import { Link } from './services/router';\`, \`import { useToast } from './services/toast';\`) instead of reimplementing. Never write raw \`fetch()\`, raw \`localStorage\`, or ad-hoc auth state when a service covers that concern.
 - **Animate with motion presets.** \`framer-motion\` is installed in every Sandpack. \`/motion.js\` exports named presets (fade, slideUp, slideDown, scale, bouncy, pushLeft) plus \`<Motion>\` and \`<MotionList>\` helpers. Use \`<Motion preset="slideUp">\`/\`<MotionList preset="slideUp">\` for reveals, transitions, and enter/exit animations instead of hand-writing keyframes or raw framer-motion configs. Only reach for raw \`motion.*\` elements when the user asks for something a preset doesn't cover.
 - **Link between screens with the router service.** The route table is auto-derived from screens on the canvas (the canvas context each turn lists all route paths). When a user action should navigate to another screen, use \`import { Link } from './services/router';\` then \`<Link to="/settings">Settings</Link>\`. The live preview intercepts these clicks and pans the canvas to the target screen. Do not hard-code \`<a href="...">\` with external URLs for internal nav; use \`<Link>\` with a known path from the route table.
 - **Pass data between screens via querystring params + useParams().** When a list screen links to a detail screen, put the target item's id in the link: \`<Link to={\\\`/recipe-detail?id=\${recipe.id}\\\`}>\`. On the detail screen, read it with \`import { useParams } from './services/router'; const { id } = useParams(); const recipe = findRecipe(id);\` — that's how clicking different items in Home updates the Detail screen to show the right row. Always use querystring params (\`?key=value&other=x\`); do not invent template-style paths like \`/recipe/:id\`.
-- **Use shared data entities instead of inlining arrays.** When a screen shows a list or a row of domain data (recipes, orders, users, transactions, etc.), FIRST call \`defineDataEntity\` to register the entity with seed rows, then have every relevant screen \`import { entities, findEntity } from './data/{name}';\`. Never inline two different hardcoded arrays of the same entity across screens — the user explicitly wants click-through flows to match up (click item A in Home → Detail shows item A).
+- **Use shared data entities instead of inlining arrays.** When a screen shows a list or a row of domain data (recipes, orders, users, transactions, etc.), FIRST call \`defineDataEntity\` to register the entity with seed rows, then have every relevant screen \`import { entities, entitiesReady, findEntity } from './data/{name}';\`. Never inline two different hardcoded arrays of the same entity across screens — the user explicitly wants click-through flows to match up (click item A in Home → Detail shows item A). If \`entitiesReady\` is false, show a loading/empty state; do not create fallback records.
 - **Use shared services for derived cross-screen values.** When multiple screens show aggregates or workflow state (cart item count, subtotal, tax, delivery fee, grand total, selected address, selected payment method, order id), FIRST call \`createService\` and have every relevant screen import the same hook/helpers. Never let each screen recompute or hardcode totals independently.
 - Plain React (default-exported function component, "export default function App()…").
 - **REQUIRED:** if you use any React hooks or refer to \`React\`, the FIRST line MUST be \`import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';\` (import only the hooks you need, but always import React itself). Do NOT use \`React.useState(…)\` without the import — Sandpack will throw "React is not defined".
@@ -205,9 +213,17 @@ Rules:
 - On review-heavy turns, \`reviewScreen\` sub-agents benefit from skill excerpts too — pass them relevant slices in the implicit system prompt via your fix instructions (reviewers auto-load the emil principles, but custom skills you've pulled should be referenced in the issue list if applicable).
 - Skills and the always-on emil-design-engineering CORE RULES are complementary: CORE_RULES is the floor every screen must respect; skills are the opt-in ceilings for specific patterns.
 
-**How to work across a turn — parallel is the default:**
+**How to work across a turn — staged quality over breadth:**
 
-**THE RULE: if two tool calls don't genuinely depend on each other, emit them in the SAME assistant message.** This is true for every tool — delegateScreen, reviewScreen, updateScreen, searchCodebase, webSearch, defineDataEntity. The client runs them concurrently. Serial execution is the EXCEPTION, not the norm. Be optimistic: if you're not sure whether two things are independent, default to parallel. You can always fire a corrective update later if something clashes — and that corrective update should itself be parallel with any other independent work you're doing.
+For non-trivial flows, do not rush into completing every screen. First build the complete picture, then implement a small complete slice:
+- Scope 1–3 screens for the first pass unless the user explicitly asks for more.
+- Ask clarifying questions when product choices affect data, state, navigation, or screen responsibilities.
+- Create a visible checklist with per-screen tasks.
+- Write flow memory before building: screens in scope, source of truth, shared services/data, navigation map, invariants, out-of-scope items, open questions, and todos.
+- It is OK to create placeholder screens/artboards to show the flow shape, but mark them as placeholders in screen memory and do not pretend they are complete.
+- Finish fewer screens deeply before expanding. A polished Cart + Payment with shared state beats five disconnected checkout screens.
+
+Parallelism is still useful, but only after scope and contracts are clear. If two tool calls don't genuinely depend on each other inside the CURRENT scoped slice, emit them in the SAME assistant message. Do not use parallelism to hide shallow thinking.
 
 Precise definition of a "real" dependency (these are the ONLY cases you serialize):
 - Call B's input literally contains data produced by call A. Example: call B is \`updateScreen({id: X, code: ...})\` and the code references a component/service/route that call A just created.
@@ -219,12 +235,13 @@ If a dependency is NOT in that list, the two calls are independent — emit them
 For a multi-screen request, the canonical flow is:
 
 1. \`planTasks\` — write the visible checklist.
-2. **Single assistant message** with (a) \`defineDataEntity\` if the app has shared domain data, (b) \`webSearch\` / \`searchCodebase\` if you need facts first, (c) \`createComponent\` for every UI primitive the batch will share (buttons, cards, list rows, top bars, tab bars, chips, empty states), and (d) all independent \`delegateScreen\` calls for the initial screen batch. Everything runs concurrently — seed sub-agent, search sub-agents, component sub-agents, screen sub-agents all in flight at once.
+2. **Scope + memory before implementation.** For flows, writeFlowMemory with the small complete slice, shared state, navigation map, invariants, open questions, and todos. If individual screen responsibilities are clear, writeScreenMemory for each screen before delegation.
+3. **Single assistant message for the scoped slice** with (a) \`defineDataEntity\` / \`createService\` if the slice has shared state, (b) \`webSearch\` / \`searchCodebase\` if you need facts first, (c) \`createComponent\` for shared UI primitives, and (d) only the delegateScreen calls needed for the scoped slice. Create placeholders only when useful for user orientation and mark them in memory.
 
    **Think in systems, not screens.** Before delegating, scan the plan: what will the screens share? A bottom tab bar that appears on Home + Discover + Profile → that's a \`<BottomTabBar>\` component, not 3 duplicated markup blocks. A recipe card row that appears on Home and Favorites → \`<RecipeCard>\`. If you catch yourself about to describe the SAME markup in two delegateScreen briefs, STOP and extract it as a component first. Then reference it in each brief: "import RecipeCard from './components/RecipeCard'; use it for every row." This is what makes the output feel like a designed system instead of six copy-pasted screens.
-3. **When they all return, a single assistant message** with (a) \`reviewScreen\` for every screen that was built, and (b) any independent \`delegateScreen\` calls for screens that depend on the first batch (if any). Reviews + next-wave delegates in the same message. Don't wait for the reviews to come back before starting the next wave of independent work — they truly are independent.
-4. **Review phase — parallel top to bottom:**
-   - Single assistant message: fire \`reviewScreen({id})\` for every screen that was just built. All in parallel. Each returns JSON \`{summary, issues: [{severity, category, location, problem, fix}]}\`.
+4. **When they return, review before expanding.** Review the built screens and the flow. Do not start the next wave until the current slice is coherent unless the next work is truly independent.
+5. **Review phase — parallel top to bottom:**
+   - Single assistant message: fire \`reviewScreen({id})\` for every screen that was just built. All in parallel. For multi-screen flows, also fire one \`reviewFlow({ids:[...]})\` covering the related screens so cross-screen data/navigation drift is caught.
    - Single assistant message: fire ONE fix operation per screen that has issues. Use \`editScreen\` only for exact tiny patches copied from current source; use \`updateScreen({id, code})\` when fixes touch multiple regions, overlap, or require rewriting surrounding structure. Do not issue several editScreen calls against the same screen in parallel.
    - Don't re-review after the fixes unless the user asks. One review cycle is the default; trust the fixes.
 
@@ -502,6 +519,38 @@ export async function POST(req: Request) {
             ),
         }),
       }),
+      getScreenSource: tool({
+        description:
+          "Return the CURRENT source for one screen with line numbers. Use before non-trivial edits or after editScreen failures so you can reference exact line ranges/source instead of guessing from compressed search excerpts.",
+        inputSchema: z.object({
+          id: z
+            .string()
+            .describe("Shape id of the screen whose source should be read."),
+          maxLines: z
+            .number()
+            .int()
+            .min(20)
+            .max(600)
+            .optional()
+            .describe("Maximum numbered lines to return. Default 320."),
+        }),
+      }),
+      editScreenLineRange: tool({
+        description:
+          "Replace an inclusive line range in the CURRENT screen source. Use after getScreenSource when exact line numbers are known. This avoids oldString mismatch failures for multi-line patches. The edited screen is compiled before the tool returns.",
+        inputSchema: z.object({
+          id: z.string().describe("Shape id of the screen to edit."),
+          startLine: z.number().int().min(1),
+          endLine: z
+            .number()
+            .int()
+            .min(1)
+            .describe("Inclusive end line. Must be >= startLine."),
+          newText: z
+            .string()
+            .describe("Replacement text for the line range. Can be empty."),
+        }),
+      }),
       delegateScreen: tool({
         description:
           "Spawn a focused sub-agent to build ONE screen. The sub-agent streams React code directly into a new screen on the canvas — you do NOT need to follow up with createScreen afterwards. This is the PRIMARY way to build screens when you have multiple to build: emit many delegateScreen tool calls IN A SINGLE ASSISTANT MESSAGE so the client runs them all in parallel. Each sub-agent has its own narrow context (just the brief + shared context you pass), so per-screen reasoning is tighter and per-screen latency is independent.",
@@ -604,7 +653,7 @@ export async function POST(req: Request) {
       }),
       createComponent: tool({
         description:
-          "Extract a shared UI primitive (Button, Card, ListRow, TabBar, EmptyState, etc.) into the project's component library at /components/{Name}.js. Every Sandpack picks it up automatically — all screens can then `import Name from './components/Name'`. CALL THIS BEFORE firing delegateScreen calls that will share a pattern, so sub-agents can compose instead of re-inlining. Idempotent by `name` (PascalCase); calling again with the same name updates the component in place. Multiple createComponent calls can run IN PARALLEL with each other and with delegateScreen calls — the component files are available as soon as each fetch resolves.",
+          "Create an app-specific shared UI primitive at /components/{Name}.js ONLY when the baseline component registry does not already cover the pattern. Reserved baseline components (Button, Card, Stack, TextField, BottomTabBar, NavBar, Switch, IconSwap, SegmentedControl, and aliases like TabBar/bottom nav) must be imported and used, not recreated. Include aliases, tags, useWhen, avoidWhen, and props so future screen agents know exactly when/how to import it. Every Sandpack picks up app-specific components automatically — all screens can then `import Name from './components/Name'`. Idempotent by `name` (PascalCase); calling again with the same non-baseline name updates it in place.",
         inputSchema: z.object({
           name: z
             .string()
@@ -620,6 +669,43 @@ export async function POST(req: Request) {
             .string()
             .describe(
               'Full component source (default-exported React function). Must use inline styles and design tokens via var(--color-*), var(--space-*), etc. — no external packages beyond react. Props should be documented in a JSDoc block. Example: `export default function Button({children, variant="primary", ...}) { ... }`.',
+            ),
+          aliases: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Alternate user/model names for this component, e.g. ['RecipeTile', 'RecipeRow'].",
+            ),
+          tags: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Machine-readable retrieval tags, e.g. ['list-row', 'recipe', 'card'].",
+            ),
+          useWhen: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Concrete cases where screens should import this component instead of recreating markup.",
+            ),
+          avoidWhen: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Concrete cases where this component should not be used.",
+            ),
+          props: z
+            .array(
+              z.object({
+                name: z.string(),
+                description: z.string(),
+                required: z.boolean().optional(),
+                example: z.string().optional(),
+              }),
+            )
+            .optional()
+            .describe(
+              "Prop contract for future sub-agents. Include required props and realistic examples.",
             ),
         }),
       }),
@@ -765,6 +851,47 @@ export async function POST(req: Request) {
             ),
         }),
       }),
+      writeScreenMemory: tool({
+        description:
+          "Write concise structured memory for one screen: purpose, dependencies, shown values, navigation, invariants, open questions, and todos. Use for per-screen context that future screens/sub-agents should respect, especially placeholders or partially completed screens.",
+        inputSchema: z.object({
+          screenId: z.string().describe("Shape id of the screen."),
+          purpose: z
+            .string()
+            .describe("One sentence: what this screen is responsible for."),
+          dependsOn: z.array(z.string()).optional(),
+          shows: z.array(z.string()).optional(),
+          navigation: z.array(z.string()).optional(),
+          invariants: z
+            .array(z.string())
+            .optional()
+            .describe("Facts this screen must preserve, e.g. total comes from checkoutState."),
+          openQuestions: z.array(z.string()).optional(),
+          todos: z
+            .array(z.string())
+            .optional()
+            .describe("Small next actions for this screen; include 'placeholder' when not complete."),
+        }),
+      }),
+      writeFlowMemory: tool({
+        description:
+          "Write concise structured memory for a multi-screen flow before implementing broadly. Captures scope, screen ids, shared state, navigation map, invariants, out-of-scope items, open questions, and todos.",
+        inputSchema: z.object({
+          title: z.string().describe("Short flow name, e.g. Checkout flow."),
+          screenIds: z
+            .array(z.string())
+            .describe("Screen ids participating in this flow, if already created."),
+          scope: z
+            .string()
+            .describe("Small complete slice being built now; be explicit about limits."),
+          sharedState: z.array(z.string()).optional(),
+          navigation: z.array(z.string()).optional(),
+          invariants: z.array(z.string()).optional(),
+          outOfScope: z.array(z.string()).optional(),
+          openQuestions: z.array(z.string()).optional(),
+          todos: z.array(z.string()).optional(),
+        }),
+      }),
       readNote: tool({
         description:
           "Fetch the full body of a note by id. The note index (with ids + title previews) is at the bottom of your system prompt. Use this to recall a specific decision or plan body without having to re-derive it.",
@@ -812,6 +939,20 @@ export async function POST(req: Request) {
         }),
         // Client-side executed: it has the screen source. The client calls
         // /api/review-screen then returns the structured result.
+      }),
+      reviewFlow: tool({
+        description:
+          "Review 2+ screens together for cross-screen consistency: shared data, checkout/order totals, selected state, route links, duplicated arrays, and component/service drift. Use after generating multi-step flows where screen-local review is insufficient.",
+        inputSchema: z.object({
+          ids: z
+            .array(z.string())
+            .min(2)
+            .max(12)
+            .describe(
+              "Shape ids for the screens that form one flow, in user-facing order.",
+            ),
+        }),
+        // Client-side executed: it has all screen sources and shared stores.
       }),
       webSearch: tool({
         description:

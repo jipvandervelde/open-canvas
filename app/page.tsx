@@ -5,6 +5,7 @@ import { ArtboardOverlay } from "@/components/ArtboardOverlay";
 import { AgentationBar } from "@/components/AgentationBar";
 import { ElementSelectionBridge } from "@/components/ElementSelectionBridge";
 import { PreviewPanel } from "@/components/PreviewPanel";
+import { LocalUserCursor } from "@/components/LocalUserCursor";
 import { EditorProvider } from "@/lib/editor-context";
 
 export default function Home() {
@@ -17,6 +18,7 @@ export default function Home() {
       <Inspector />
       <PreviewPanel />
       <ElementSelectionBridge />
+      <LocalUserCursor />
     </EditorProvider>
   );
 }
